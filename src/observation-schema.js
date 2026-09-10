@@ -65,10 +65,49 @@ export function reviewExtraction(raw, source) {
     const quoted = escape(normalize(accepted));
     return new RegExp(`(?:${label})[^.\\n]{0,35}\\b${quoted}\\b`, 'i').test(normalizedSource) ? accepted : null;
   };
-  const equipment = fields.equipment.map(item => {
+  const occurrences = new Map();
+  const mentions = fields.equipment.map(item => {
+    const value = normalize(supported(item.modality) ?? '');
+    if (!value) return -1;
+    const occurrence = occurrences.get(value) ?? 0;
+    let position = -1;
+    let from = 0;
+    for (let index = 0; index <= occurrence; index += 1) {
+      position = normalizedSource.indexOf(value, from);
+      if (position === -1) break;
+      from = position + value.length;
+    }
+    occurrences.set(value, occurrence + 1);
+    return position === -1 ? normalizedSource.indexOf(value) : position;
+  });
+  const positions = [...new Set(mentions.filter(position => position >= 0))].sort((a, b) => a - b);
+  /** @param {number} itemIndex */
+  function clauseFor(itemIndex) {
+    const mention = mentions[itemIndex];
+    if (mention < 0) return '';
+    const before = [normalizedSource.lastIndexOf('.', mention - 1), normalizedSource.lastIndexOf('\n', mention - 1)];
+    let start = Math.max(...before) + 1;
+    const after = [normalizedSource.indexOf('.', mention), normalizedSource.indexOf('\n', mention)].filter(position => position >= 0);
+    let end = after.length ? Math.min(...after) : normalizedSource.length;
+    const previous = positions.filter(position => position < mention && position >= start).at(-1);
+    const next = positions.find(position => position > mention && position <= end);
+    const delimiters = /(?:\s+y\s+|\s+and\s+|;|,)/g;
+    if (previous !== undefined) {
+      const matches = [...normalizedSource.slice(previous, mention).matchAll(delimiters)];
+      const last = matches.at(-1);
+      start = last ? previous + last.index + last[0].length : mention;
+    }
+    if (next !== undefined) {
+      const matches = [...normalizedSource.slice(mention, next).matchAll(delimiters)];
+      const last = matches.at(-1);
+      end = last ? mention + last.index : next;
+    }
+    return normalizedSource.slice(start, end);
+  }
+  const equipment = fields.equipment.map((item, itemIndex) => {
     const rawModality = supported(item.modality);
     const modalityText = normalize(rawModality ?? '');
-    const context = normalizedSource.split(/[.\n]+/).find(sentence => modalityText && sentence.includes(modalityText)) ?? '';
+    const context = clauseFor(itemIndex);
     /** @param {string | null} value @param {string} label */
     const equipmentField = (value, label) => {
       const accepted = value && context.includes(normalize(value)) ? value : null;
