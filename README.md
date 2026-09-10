@@ -1,17 +1,17 @@
 # SiteSignal
 
-Prototipo local de inteligencia de base instalada. Esta entrega implementa el arranque (#2); la captura de observaciones todavía no está disponible.
+Prototipo local de inteligencia de base instalada. Permite capturar una observación escrita, revisar la extracción local de QVAC y consultar su procedencia en el perfil 360 del hospital.
 
 ## Preparación en Windows (con conexión)
 
 1. Instala Node.js 24 o superior (probado con 26.7.0). Abre PowerShell en este repositorio.
 2. Ejecuta `npm ci`.
 3. Ejecuta `npx qvac doctor` y comprueba la disponibilidad del runtime.
-4. Descarga un modelo GGUF de texto compatible con QVAC. La exploración existente `npm run qvac:test` descarga Llama 3.2 1B Q4 en la caché de QVAC y realiza una inferencia. Este modelo permite comprobar el arranque; no está validado para extracción fiable.
-5. Configura la ruta absoluta del archivo descargado, por ejemplo:
+4. Ejecuta `npm run qvac:prepare:text`. Esto descarga Qwen3 4B Q4_K_M (aproximadamente 2.5 GB), lo carga mediante QVAC y muestra la ruta local exacta. Haz este paso antes de desconectarte.
+5. Configura la ruta mostrada, por ejemplo:
 
 ```powershell
-$env:SITESIGNAL_MODEL = 'C:\ruta\al\modelo.gguf'
+$env:SITESIGNAL_MODEL = 'C:\Users\tu-usuario\.qvac\models\archivo_Qwen3-4B-Q4_K_M.gguf'
 .\Start-SiteSignal.ps1
 ```
 
@@ -32,7 +32,7 @@ npm run typecheck
 npm test
 ```
 
-Las pruebas consultan la API HTTP con SQLite temporal real y adaptadores de IA deterministas. Para comprobar QVAC real, configura `SITESIGNAL_MODEL`, ejecuta el iniciador y espera el resultado del panel. La prueba completa de extracción sin conexión corresponde a las siguientes entregas.
+Las pruebas consultan la API HTTP con SQLite temporal real y un adaptador de texto determinista. Para comprobar la extracción real en español e inglés, configura `SITESIGNAL_MODEL` y ejecuta `npm run qvac:check:text`. Las respuestas varían según el modelo y siempre pasan por una revisión humana antes de guardarse. La prueba completa con la red deshabilitada corresponde a la entrega final.
 
 ## Origen
 

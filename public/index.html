@@ -1,12 +1,22 @@
 <!doctype html>
 <html lang="es">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SiteSignal · Inicio</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SiteSignal · Observaciones</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script type="module" src="/capture.js"></script></head>
 <body><header><a href="/" class="brand"><span class="mark">S</span> SiteSignal</a><span class="local">En tu computadora</span></header>
 <main><p class="eyebrow">INTELIGENCIA DE BASE INSTALADA</p><h1>Todo empieza con una observación.</h1><p class="intro">Un espacio local para convertir el conocimiento de las visitas en información útil sobre los equipos de cada hospital.</p>
+<nav aria-label="Secciones"><a href="#capture">Nueva observación</a><a href="#hospitals">Clientes y hospitales</a><a href="#status-heading">Entorno local</a></nav>
+<p id="feedback" role="status" aria-live="polite"></p>
+<section id="capture" aria-labelledby="capture-title"><p class="eyebrow">01 · CAPTURAR</p><h2 id="capture-title">Registrar una visita</h2>
+<div class="profile-box"><label for="profile">Perfil de colaborador activo</label><select id="profile"><option value="">Selecciona un perfil</option></select>
+<details><summary>Crear perfil de colaborador</summary><form id="profile-form" class="form-grid"><label>Nombre<input name="name" required maxlength="80" placeholder="Ej. Ana Demo"></label><label>Rol<select name="role"><option>Ingeniero de servicio</option><option>Vendedor</option><option>Especialista</option></select></label><button type="submit">Crear y seleccionar</button></form></details></div>
+<form id="capture-form"><label for="observation">¿Qué observaste durante la visita?</label><p class="hint">Escribe en español o inglés. Incluye solo datos ficticios; deja fuera lo que no conozcas.</p><textarea id="observation" required minlength="5" maxlength="8000" rows="5" placeholder="Visité Hospital Aurora del cliente Red Horizonte, área Norte. Vi dos tomógrafos; parecen tener ocho años."></textarea><button type="submit" class="primary" id="extract">Extraer con QVAC</button></form>
+</section>
+<section id="review" hidden aria-labelledby="review-title"><p class="eyebrow">02 · REVISAR</p><h2 id="review-title">Revisa antes de guardar</h2><p id="draft-author"></p><p class="hint">Corrige la interpretación. Los campos vacíos se guardan como desconocidos. Revisar un dato no lo convierte en un hecho confirmado.</p>
+<form id="review-form"><label for="hospital-choice">Destino de la observación</label><select id="hospital-choice" required></select><div id="location-fields" class="form-grid"></div><div id="equipment-cards" class="equipment-grid"></div><button type="button" id="add-equipment">Añadir tarjeta</button><p id="inference-info" class="detail"></p><button type="submit" class="primary" id="save">Guardar observación revisada</button></form></section>
+<section id="hospitals" aria-labelledby="hospitals-title"><p class="eyebrow">03 · CONSULTAR</p><h2 id="hospitals-title">Clientes y hospitales</h2><p class="hint">Selecciona un hospital para consultar sus observaciones de campo y su procedencia.</p><div id="hospital-list" class="hospital-list"></div><div id="hospital-view" aria-live="polite"></div></section>
 <section aria-labelledby="status-heading"><div class="section-title"><h2 id="status-heading">Estado del entorno</h2><button id="refresh">Actualizar</button></div><p id="summary" role="status">Conectando con SiteSignal…</p><div class="cards">
 <article><span class="number">01</span><h3>Aplicación</h3><p id="api-state">Comprobando…</p><p id="api-message"></p></article>
 <article><span class="number">02</span><h3>Almacenamiento</h3><p id="database-state">Comprobando…</p><p id="database-message"></p></article>
 <article><span class="number">03</span><h3>Inteligencia local</h3><p id="qvac-state">Comprobando…</p><p id="qvac-message"></p></article>
 </div><p id="installation" class="detail"></p></section>
-<aside><h2>La base está tomando forma</h2><p>Esta primera entrega comprueba el arranque y la persistencia local. La captura de observaciones llegará en la siguiente entrega.</p></aside></main>
+</main>
 <footer>SiteSignal · Prototipo con datos sintéticos</footer></body></html>

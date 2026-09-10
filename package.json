@@ -7,10 +7,13 @@
     "start": "node src/start.js",
     "test": "node --test test/*.test.js",
     "typecheck": "tsc --noEmit",
-    "qvac:test": "node quickstart.js"
+    "qvac:test": "node quickstart.js",
+    "qvac:prepare:text": "node scripts/prepare-text-model.js",
+    "qvac:check:text": "node scripts/check-text-qvac.js"
   },
   "dependencies": {
-    "@qvac/sdk": "^0.19.0"
+    "@qvac/sdk": "^0.19.0",
+    "zod": "^4.6.1"
   },
   "devDependencies": {
     "@qvac/cli": "^0.13.0",
