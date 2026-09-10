@@ -230,6 +230,21 @@ async function decideDuplicate(hospitalId, candidateId, decision) {
     feedback(decision === 'consolidate' ? 'Equipos consolidados con toda su procedencia.' : 'Los equipos se conservaron separados.');
   } catch (error) { report(error); }
 }
+/** @param {string} hospitalId @param {string} itemId @param {string} field @param {string} rawValue @param {string} reason */
+async function correctEquipment(hospitalId, itemId, field, rawValue, reason) {
+  const value = rawValue.trim() === '' ? null : ['quantity', 'age'].includes(field) ? Number(rawValue) : rawValue.trim();
+  try {
+    await api(`/api/installed-equipment/${itemId}/corrections`, { field, value, reason });
+    await showHospital(hospitalId); feedback('Corrección guardada como dato reportado en el historial.');
+  } catch (error) { report(error); }
+}
+/** @param {string} hospitalId @param {string} conflictId @param {string} serializedValue @param {string} explanation */
+async function resolveConflict(hospitalId, conflictId, serializedValue, explanation) {
+  try {
+    await api(`/api/conflicts/${conflictId}/resolve`, { value: JSON.parse(serializedValue), explanation });
+    await showHospital(hospitalId); feedback('Conflicto resuelto con explicación y registro de cambios.');
+  } catch (error) { report(error); }
+}
 /** @param {string} id */
 async function showHospital(id) {
   const hospital = await api('/api/hospitals/' + id); const target = el('hospital-view'); target.replaceChildren();
@@ -239,18 +254,41 @@ async function showHospital(id) {
   if (!hospital.installedBase.items.length) base.append(node('p', 'Todavía no hay equipos representados.'));
   for (const item of hospital.installedBase.items) {
     const card = document.createElement('article'); card.className = `installed-item ${item.kind}`;
-    card.append(node('p', item.kind === 'group' ? `GRUPO DE EQUIPOS · ${item.quantity ?? 'cantidad desconocida'}` : 'EQUIPO INDIVIDUAL'));
+    const kindLabel = item.kind === 'group' ? `GRUPO DE EQUIPOS · ${item.quantity ?? 'cantidad desconocida'}` : item.kind === 'consolidated' ? 'EQUIPO CONSOLIDADO' : 'EQUIPO INDIVIDUAL';
+    card.append(node('p', kindLabel));
     card.append(node('h4', item.modality ?? 'Modalidad desconocida'));
     const details = document.createElement('dl'); details.className = 'equipment-summary';
-    for (const [key, label] of [['manufacturer', 'Fabricante'], ['model', 'Modelo'], ['serial', 'Número de serie'], ['age', 'Antigüedad']]) details.append(node('dt', label), node('dd', item[key] ?? 'Desconocido'));
+    for (const [key, label] of [['manufacturer', 'Fabricante'], ['model', 'Modelo'], ['serial', 'Número de serie'], ['age', 'Antigüedad']]) details.append(node('dt', label), node('dd', `${item[key] ?? 'Desconocido'} · ${item.fieldStates[key]}`));
     card.append(details, node('p', `Procedencia: ${item.sourceObservationIds.length} observación${item.sourceObservationIds.length === 1 ? '' : 'es'} · ${item.sourceObservationIds.map(/** @param {string} value */ value => value.slice(0, 8)).join(', ')}`));
+    card.append(node('p', `Evidencias vinculadas: ${item.evidenceIds?.length ?? 0}`));
     if (item.splitHistory.length) card.append(node('p', `Separaciones revisadas: ${item.splitHistory.length} · última por ${item.splitHistory.at(-1).profile.name}`));
+    const correction = document.createElement('details'); correction.className = 'correction-form'; correction.append(node('summary', 'Corregir un dato'));
+    const correctionFields = document.createElement('select');
+    for (const [key, label] of equipmentFields) option(correctionFields, key, label);
+    const correctionValue = document.createElement('input'); correctionValue.placeholder = 'Nuevo valor; vacío significa desconocido'; correctionValue.maxLength = 300;
+    const reason = document.createElement('textarea'); reason.placeholder = 'Motivo de la corrección'; reason.maxLength = 500; reason.rows = 2;
+    const saveCorrection = document.createElement('button'); saveCorrection.type = 'button'; saveCorrection.textContent = 'Guardar corrección';
+    saveCorrection.addEventListener('click', () => correctEquipment(id, item.id, correctionFields.value, correctionValue.value, reason.value));
+    correction.append(correctionFields, correctionValue, reason, saveCorrection); card.append(correction);
     base.append(card);
   }
   target.append(base);
+  if (hospital.installedBase.conflicts.length) {
+    target.append(node('h3', 'Conflictos pendientes'));
+    for (const conflict of hospital.installedBase.conflicts) {
+      const conflictCard = document.createElement('article'); conflictCard.className = 'pending-conflict';
+      const label = Object.fromEntries(equipmentFields)[conflict.field] ?? conflict.field;
+      conflictCard.append(node('p', 'CONFLICTO PENDIENTE'), node('h4', label), node('p', `Las observaciones respaldan valores incompatibles: ${conflict.values.join(' ↔ ')}`));
+      const outcome = document.createElement('select');
+      for (const value of conflict.values) option(outcome, JSON.stringify(value), String(value));
+      const explanation = document.createElement('textarea'); explanation.placeholder = 'Explica por qué eliges este valor'; explanation.maxLength = 500; explanation.rows = 3;
+      const resolve = document.createElement('button'); resolve.type = 'button'; resolve.className = 'primary'; resolve.textContent = 'Resolver conflicto';
+      resolve.addEventListener('click', () => resolveConflict(id, conflict.id, outcome.value, explanation.value));
+      conflictCard.append(outcome, explanation, resolve); target.append(conflictCard);
+    }
+  }
   if (hospital.installedBase.duplicateCandidates.length) {
     target.append(node('h3', 'Candidatos a duplicado pendientes'));
-    /** @type {Record<string, string>} */
     /** @type {Record<string, string>} */
     const labels = { hospital: 'Hospital', modality: 'Modalidad', manufacturer: 'Fabricante', model: 'Modelo', quantity: 'Cantidad', age: 'Antigüedad aproximada', serial: 'Número de serie' };
     for (const candidate of hospital.installedBase.duplicateCandidates) {
@@ -275,6 +313,12 @@ async function showHospital(id) {
       const consolidate = document.createElement('button'); consolidate.className = 'primary'; consolidate.textContent = 'Consolidar'; consolidate.addEventListener('click', () => decideDuplicate(id, candidate.id, 'consolidate'));
       actions.append(separate, consolidate); review.append(actions); target.append(review);
     }
+  }
+  if (hospital.installedBase.changeHistory.length || hospital.installedBase.conflictHistory.some(/** @param {any} conflict */ conflict => conflict.status === 'resolved')) {
+    const history = document.createElement('details'); history.className = 'audit-history'; history.append(node('summary', 'Historial de cambios y conflictos resueltos'));
+    for (const change of hospital.installedBase.changeHistory) history.append(node('p', `${new Date(change.at).toLocaleString('es')} · ${change.author.name} · ${change.field}: ${change.oldValue ?? 'Desconocido'} → ${change.newValue ?? 'Desconocido'} · ${change.reason}`));
+    for (const conflict of hospital.installedBase.conflictHistory.filter(/** @param {any} entry */ entry => entry.status === 'resolved')) history.append(node('p', `Conflicto ${conflict.field} resuelto por ${conflict.resolution.author.name}: ${conflict.resolution.value} · ${conflict.resolution.explanation}`));
+    target.append(history);
   }
   target.append(node('h3', 'Observaciones que sustentan la base instalada'));
   for (const observation of hospital.observations) {

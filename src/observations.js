@@ -7,6 +7,10 @@ import { RequestError } from './request-error.js';
 
 const followUpAnswerSchema = z.object({ answer: z.union([z.string().trim().min(1).max(300), z.number(), z.null()]) }).strict();
 const duplicateDecisionSchema = z.object({ decision: z.enum(['keep-separate', 'consolidate']) }).strict();
+const correctionSchema = z.object({ field: z.enum(['modality', 'quantity', 'manufacturer', 'model', 'serial', 'age']),
+  value: z.union([z.string().trim().min(1).max(300), z.number(), z.null()]), reason: z.string().trim().min(3).max(500) }).strict();
+const conflictResolutionSchema = z.object({ value: z.union([z.string().trim().min(1).max(300), z.number()]),
+  explanation: z.string().trim().min(3).max(500) }).strict();
 
 /** @param {import('node:sqlite').DatabaseSync} db @param {import('./observation-schema.js').TextExtractor} extractText @param {() => Date} now @param {(record: any) => string[]} confirmationResolver */
 export function observationApi(db, extractText, now = () => new Date(), confirmationResolver = () => []) {
@@ -39,7 +43,8 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       ? { kind: 'qvac', metadata: observation.inference, attempts: 1, retryCorrected: false, validationIssues: [] }
       : { kind: 'manual', attempts: 2, validationIssues: [] });
     const current = { ...observation, provenance };
-    return { ...current, assessment: assessObservation({ ...current, confirmedFields: confirmationResolver(current) }, now()) };
+    const confirmedFields = [...new Set([...confirmationResolver(current), ...base.confirmedFieldsForObservation(current)])];
+    return { ...current, assessment: assessObservation({ ...current, confirmedFields }, now()) };
   }
   /** @param {string} method @param {string} path @param {unknown} body */
   return async function handle(method, path, body) {
@@ -60,6 +65,29 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       return { activeProfileId: profileId };
     }
     if (path === '/api/confidence-policy' && method === 'GET') return confidencePolicy;
+    const correctionMatch = path.match(/^\/api\/installed-equipment\/([0-9a-f-]+)\/corrections$/);
+    if (correctionMatch && method === 'POST') {
+      const itemId = z.uuid().parse(correctionMatch[1]); const input = correctionSchema.parse(body);
+      let value = input.value;
+      if (input.field === 'modality') value = z.enum(modalities).nullable().parse(value);
+      else if (input.field === 'quantity') value = z.number().int().min(1).max(10000).nullable().parse(value);
+      else if (input.field === 'age') value = z.number().min(0).max(150).nullable().parse(value);
+      else value = z.string().trim().min(1).max(300).nullable().parse(value);
+      const active = db.prepare("SELECT value FROM preferences WHERE key = 'activeProfile'").get();
+      if (!active) throw new RequestError(409, 'Selecciona un perfil de colaborador para corregir el dato.');
+      db.exec('BEGIN');
+      try { const result = base.correct(itemId, input.field, value, input.reason, profile(String(active.value))); db.exec('COMMIT'); return result; }
+      catch (error) { db.exec('ROLLBACK'); throw error; }
+    }
+    const conflictMatch = path.match(/^\/api\/conflicts\/([0-9a-f-]+)\/resolve$/);
+    if (conflictMatch && method === 'POST') {
+      const conflictId = z.uuid().parse(conflictMatch[1]); const input = conflictResolutionSchema.parse(body);
+      const active = db.prepare("SELECT value FROM preferences WHERE key = 'activeProfile'").get();
+      if (!active) throw new RequestError(409, 'Selecciona un perfil de colaborador para resolver el conflicto.');
+      db.exec('BEGIN');
+      try { const result = base.resolveConflict(conflictId, input.value, input.explanation, profile(String(active.value))); db.exec('COMMIT'); return result; }
+      catch (error) { db.exec('ROLLBACK'); throw error; }
+    }
     const duplicateDecisionMatch = path.match(/^\/api\/duplicate-candidates\/([0-9a-f-]+)\/decision$/);
     if (duplicateDecisionMatch && method === 'POST') {
       const candidateId = z.uuid().parse(duplicateDecisionMatch[1]);

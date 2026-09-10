@@ -33,6 +33,8 @@ Una cantidad conjunta se incorpora a la base instalada como un grupo, sin crear 
 
 SiteSignal presenta una serie idéntica como coincidencia fuerte. Sin serie, sugiere candidatos cuando coinciden el hospital, la modalidad y al menos otro dato entre fabricante, modelo, cantidad o antigüedad aproximada. La comparación muestra coincidencias y diferencias; solo una decisión explícita permite consolidar. Conservar separados no modifica la base instalada, mientras que consolidar elimina el conteo duplicado y mantiene todas las observaciones originales.
 
+Las observaciones incompatibles sobre un equipo con la misma serie permanecen visibles como conflictos pendientes. Resolver exige seleccionar uno de los valores respaldados y escribir una explicación. Las correcciones de la base instalada registran valor anterior, valor nuevo, perfil, fecha y motivo, y permanecen como datos reportados. Una coincidencia entre observaciones de perfiles distintos confirma únicamente los campos que ambas respaldan. El historial se presenta separado de la proyección actual y persiste en SQLite.
+
 Variables opcionales: `SITESIGNAL_PORT` (1–65535), `SITESIGNAL_DATA` (directorio de almacenamiento). `SITESIGNAL_MODEL` debe configurarse en cada terminal nueva o persistirse mediante la configuración de entorno de Windows. Un modelo ausente permite abrir la interfaz con instrucciones de recuperación; un puerto ocupado o almacenamiento sin permisos impide arrancar y produce un mensaje en terminal. No se modifica ni elimina la base existente.
 
 ## Validación

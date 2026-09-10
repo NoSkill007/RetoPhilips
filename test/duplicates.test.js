@@ -95,5 +95,7 @@ test('una coincidencia aproximada explica diferencias y solo consolida por decis
     assert.deepEqual(new Set(consolidated.sourceObservationIds), new Set([first.id, second.id]));
     assert.equal(consolidated.consolidation.originals.length, 2);
     assert.equal(consolidated.consolidation.decision.profile.name, 'Ana Demo');
+    assert.equal(hospital.installedBase.conflicts.length, 1);
+    assert.equal(hospital.installedBase.conflicts[0].field, 'model');
   } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
 });
