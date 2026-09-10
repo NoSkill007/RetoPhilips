@@ -139,6 +139,8 @@ function renderReview() {
   const notice = el('validation-notice'); notice.replaceChildren();
   if (draft.provenance.kind === 'manual') {
     notice.hidden = false; notice.append(node('h3', 'Captura manual activada'), node('p', 'QVAC falló dos veces. El relato original está intacto; completa solo los datos que puedas revisar.'));
+  } else if (draft.provenance.partial) {
+    notice.hidden = false; notice.append(node('h3', 'Extracción parcial segura'), node('p', 'Tras dos intentos, SiteSignal conservó únicamente los datos respaldados por el relato. Completa o corrige los campos vacíos antes de guardar.'));
   } else if (draft.provenance.retryCorrected) {
     notice.hidden = false; notice.append(node('h3', 'Extracción corregida'), node('p', 'La primera salida no fue válida. QVAC corrigió la extracción en el segundo y último intento.'));
   } else notice.hidden = true;

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { profileSchema, activeSchema, captureSchema, saveSchema, inferenceSchema, validateExtraction, normalize, modalities } from './observation-schema.js';
+import { profileSchema, activeSchema, captureSchema, saveSchema, inferenceSchema, validateExtraction, sanitizeExtraction, normalize, modalities } from './observation-schema.js';
 import { assessObservation, confidencePolicy, nextFollowUp } from './confidence.js';
 import { installedBase } from './installed-base.js';
 import { RequestError } from './request-error.js';
@@ -111,33 +111,43 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       const collaborator = profile(String(active.value));
       const validationIssues = [];
       let validResult;
+      let bestResult;
       let attempts = 0;
+      let correctiveInstruction = 'Respeta la estructura completa del schema. Devuelve null JSON real para datos ausentes, nunca textos como "null" o "no specified". Copia cada valor no nulo literalmente, sin cambiar singular o plural. No inventes una cantidad al dividir un grupo.';
       for (attempts = 1; attempts <= 2; attempts += 1) {
         try {
           const extraction = await extractText(text, { attempt: attempts,
-            ...(attempts === 2 ? { correctiveInstruction: 'Corrige la salida anterior: respeta el schema completo, copia solo afirmaciones respaldadas por su cláusula y usa únicamente modalidades permitidas.' } : {}) });
+            ...(attempts === 2 ? { correctiveInstruction } : {}) });
           const inference = inferenceSchema.parse(extraction.metadata);
-          const validation = validateExtraction(extraction.fields, text);
+          const cleanedFields = sanitizeExtraction(extraction.fields);
+          const validation = validateExtraction(cleanedFields, text);
+          const score = Number(validation.reviewed.hospital !== null) * 10 + validation.reviewed.equipment.reduce((total, item) => total + Object.values(item).filter(value => value !== null).length, 0);
+          const candidate = { extraction, inference, reviewed: validation.reviewed, cleanedFields, score, issues: validation.issues, attempt: attempts };
+          if (!bestResult || candidate.score > bestResult.score) bestResult = candidate;
           if (validation.issues.length) {
             validationIssues.push(...validation.issues);
+            correctiveInstruction = `Corrige la salida anterior. ${correctiveInstruction} Errores detectados: ${validation.issues.slice(0, 6).join(' ')}`;
             continue;
           }
-          validResult = { extraction, inference, reviewed: validation.reviewed };
+          validResult = candidate;
           break;
         } catch {
           validationIssues.push(`Intento ${attempts}: QVAC no devolvió el schema completo y válido.`);
         }
       }
+      if (!validResult && bestResult?.reviewed.hospital && bestResult.reviewed.equipment.some(item => item.modality !== null)) {
+        validResult = bestResult; attempts = 2;
+      }
       const manual = !validResult;
       const reviewed = validResult?.reviewed ?? { client: null, hospital: null, area: null, equipment: [
         { modality: null, quantity: null, manufacturer: null, model: null, serial: null, age: null },
       ] };
-      const issues = [...new Set(validationIssues)];
+      const issues = [...new Set(validResult ? validResult.issues : validationIssues)];
       const provenance = validResult
-        ? { kind: 'qvac', metadata: validResult.inference, attempts, retryCorrected: attempts === 2, validationIssues: issues }
+        ? { kind: 'qvac', metadata: validResult.inference, attempts, retryCorrected: attempts === 2, partial: validResult.issues.length > 0, validationIssues: issues }
         : { kind: 'manual', attempts: 2, validationIssues: issues };
       const draft = { id: randomUUID(), originalText: text, reviewed,
-        extracted: validResult?.extraction.fields ?? null, profile: collaborator, provenance, capturedAt, followUpHistory: [] };
+        extracted: validResult?.cleanedFields ?? null, profile: collaborator, provenance, capturedAt, followUpHistory: [] };
       db.prepare('INSERT INTO drafts VALUES (?, ?)').run(draft.id, JSON.stringify(draft));
       return presentDraft(draft);
     }

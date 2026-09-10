@@ -77,3 +77,29 @@ test('modalidades y afirmaciones sin respaldo se rechazan visiblemente', async (
     assert.ok(draft.provenance.validationIssues.some(/** @param {string} issue */ issue => /fabricante/i.test(issue)));
   } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
 });
+
+test('conserva la parte segura cuando QVAC usa textos para null y repite afirmaciones inválidas', async () => {
+  const sourceText = 'Estoy en Hospital DemoCare Pacific, en Ciudad de Panamá. Tienen dos resonadores magnéticos y un tomógrafo. Uno de los resonadores parece de unos ocho años, marca Siemens, pero el otro no alcancé a ver el modelo.';
+  const outputs = [
+    { client: 'Hospital DemoCare Pacific', hospital: 'Hospital DemoCare Pacific', area: 'Ciudad de Panamá', equipment: [
+      { modality: 'resonador magnético', quantity: 'dos', manufacturer: 'Siemens', model: 'null', serial: 'null', age: 'ocho años' },
+      { modality: 'resonador magnético', quantity: 'uno', manufacturer: 'null', model: 'null', serial: 'null', age: 'null' },
+      { modality: 'tomógrafo', quantity: 'uno', manufacturer: 'null', model: 'null', serial: 'null', age: 'null' },
+    ] },
+    { client: 'Hospital DemoCare Pacific', hospital: 'Hospital DemoCare Pacific', area: 'no specified', equipment: [
+      { modality: 'resonador magnético', quantity: 'dos', manufacturer: 'Siemens', model: 'no specified', serial: 'no specified', age: 'ocho años' },
+      { modality: 'resonador magnético', quantity: 'uno', manufacturer: 'no specified', model: 'no specified', serial: 'no specified', age: 'no specified' },
+      { modality: 'tomógrafo', quantity: 'uno', manufacturer: 'no specified', model: 'no specified', serial: 'no specified', age: 'no specified' },
+    ] },
+  ];
+  let calls = 0;
+  const context = await scenario(async (_text, options) => ({ fields: outputs[calls++], metadata: { engine: 'QVAC', model: 'fixture', durationMs: options?.attempt ?? 1 } }));
+  try {
+    const draft = await context.post('/api/drafts', { text: sourceText });
+    assert.equal(calls, 2); assert.equal(draft.provenance.kind, 'qvac'); assert.equal(draft.provenance.retryCorrected, true); assert.equal(draft.provenance.partial, true);
+    assert.equal(draft.reviewed.hospital, 'Hospital DemoCare Pacific'); assert.equal(draft.reviewed.area, null);
+    assert.ok(draft.reviewed.equipment.some(/** @param {any} item */ item => item.modality === 'Tomografía computarizada' && item.quantity === 1));
+    assert.ok(draft.provenance.validationIssues.length > 0);
+    assert.ok(draft.extracted.equipment.every(/** @param {any} item */ item => !Object.values(item).includes('null') && !Object.values(item).includes('no specified')));
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});

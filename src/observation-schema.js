@@ -28,6 +28,19 @@ export const saveSchema = z.object({
 
 /** @param {string} value */
 export function normalize(value) { return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
+/** Convert common model placeholders for missing data into actual JSON null values before evidence validation.
+ * @param {unknown} raw
+ */
+export function sanitizeExtraction(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  /** @param {unknown} value */
+  const fieldValue = value => typeof value === 'string' && /^(?:null|none|n\/?a|unknown|not specified|no specified|desconocido|no especificado)$/i.test(value.trim()) ? null : value;
+  const input = /** @type {Record<string, any>} */ (raw);
+  return {
+    ...input, client: fieldValue(input.client), hospital: fieldValue(input.hospital), area: fieldValue(input.area),
+    equipment: Array.isArray(input.equipment) ? input.equipment.map(item => item && typeof item === 'object' ? Object.fromEntries(Object.entries(item).map(([key, value]) => [key, fieldValue(value)])) : item) : input.equipment,
+  };
+}
 /** @param {string | null} value */
 function numeric(value) {
   if (!value) return null;
