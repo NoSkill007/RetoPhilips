@@ -135,6 +135,7 @@ function renderReview() {
   option(target, 'new', 'Crear un hospital con los datos revisados');
   for (const hospital of hospitals) option(target, hospital.id, `${draft.candidates.some(/** @param {{id: string}} c */ c => c.id === hospital.id) ? 'Posible coincidencia · ' : ''}${hospital.name} · ${hospital.client ?? 'Cliente desconocido'}`);
   target.value = draft.candidates.length ? '' : 'new';
+  renderSplitGroups(null);
   const notice = el('validation-notice'); notice.replaceChildren();
   if (draft.provenance.kind === 'manual') {
     notice.hidden = false; notice.append(node('h3', 'Captura manual activada'), node('p', 'QVAC falló dos veces. El relato original está intacto; completa solo los datos que puedas revisar.'));
@@ -151,7 +152,17 @@ function renderReview() {
   renderFollowUp();
   el('review').hidden = false; el('review').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
-select('hospital-choice').addEventListener('change', () => {
+/** @param {string | null} hospitalId */
+async function renderSplitGroups(hospitalId) {
+  const panel = el('split-group-panel'); const target = select('split-group-choice'); target.replaceChildren();
+  option(target, '', 'No separar de ningún grupo');
+  if (!hospitalId) { panel.hidden = true; return; }
+  const hospital = await api('/api/hospitals/' + hospitalId);
+  const groups = hospital.installedBase.items.filter(/** @param {any} item */ item => item.kind === 'group' && Number.isInteger(item.quantity));
+  for (const group of groups) option(target, group.id, `${group.modality ?? 'Modalidad desconocida'} · grupo de ${group.quantity}`);
+  panel.hidden = groups.length === 0;
+}
+select('hospital-choice').addEventListener('change', async () => {
   const hospital = hospitals.find(h => h.id === select('hospital-choice').value);
   for (const key of ['hospital', 'client']) {
     const input = form('review-form').elements.namedItem(key);
@@ -160,6 +171,7 @@ select('hospital-choice').addEventListener('change', () => {
       input.value = hospital ? String((key === 'hospital' ? hospital.name : hospital.client) ?? '') : String(draft.reviewed[key] ?? '');
     }
   }
+  try { await renderSplitGroups(hospital?.id ?? null); } catch (error) { report(error); }
 });
 form('capture-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -192,7 +204,9 @@ form('review-form').addEventListener('submit', async event => {
     }) };
   button.disabled = true;
   try {
-    const saved = await api('/api/observations', { draftId: draft.id, reviewed, hospitalId: select('hospital-choice').value === 'new' ? null : select('hospital-choice').value });
+    const saved = await api('/api/observations', { draftId: draft.id, reviewed,
+      hospitalId: select('hospital-choice').value === 'new' ? null : select('hospital-choice').value,
+      splitGroupId: select('split-group-choice').value || null });
     draft = null; el('review').hidden = true; form('capture-form').reset();
     await loadHospitals(); await showHospital(saved.hospitalId); feedback('Observación guardada con su texto original y procedencia.');
     el('hospital-view').scrollIntoView({ behavior: 'smooth' });
@@ -212,7 +226,20 @@ async function loadHospitals() {
 async function showHospital(id) {
   const hospital = await api('/api/hospitals/' + id); const target = el('hospital-view'); target.replaceChildren();
   target.append(node('h2', `Perfil 360 · ${hospital.name}`), node('p', `Cliente: ${hospital.client ?? 'Desconocido'}`));
-  target.append(node('p', 'Observaciones reportadas con estados y confianza explicable. La consolidación de equipos se incorporará en próximas entregas.'));
+  target.append(node('h3', `Base instalada · ${hospital.installedBase.total} equipos reportados`));
+  const base = document.createElement('div'); base.className = 'installed-base';
+  if (!hospital.installedBase.items.length) base.append(node('p', 'Todavía no hay equipos representados.'));
+  for (const item of hospital.installedBase.items) {
+    const card = document.createElement('article'); card.className = `installed-item ${item.kind}`;
+    card.append(node('p', item.kind === 'group' ? `GRUPO DE EQUIPOS · ${item.quantity ?? 'cantidad desconocida'}` : 'EQUIPO INDIVIDUAL'));
+    card.append(node('h4', item.modality ?? 'Modalidad desconocida'));
+    const details = document.createElement('dl'); details.className = 'equipment-summary';
+    for (const [key, label] of [['manufacturer', 'Fabricante'], ['model', 'Modelo'], ['serial', 'Número de serie'], ['age', 'Antigüedad']]) details.append(node('dt', label), node('dd', item[key] ?? 'Desconocido'));
+    card.append(details, node('p', `Procedencia: ${item.sourceObservationIds.length} observación${item.sourceObservationIds.length === 1 ? '' : 'es'} · ${item.sourceObservationIds.map(/** @param {string} value */ value => value.slice(0, 8)).join(', ')}`));
+    if (item.splitHistory.length) card.append(node('p', `Separaciones revisadas: ${item.splitHistory.length} · última por ${item.splitHistory.at(-1).profile.name}`));
+    base.append(card);
+  }
+  target.append(base, node('h3', 'Observaciones que sustentan la base instalada'));
   for (const observation of hospital.observations) {
     const article = document.createElement('article');
     article.append(node('h3', `${observation.profile.name} · ${observation.profile.role}`), node('p', new Date(observation.createdAt).toLocaleString('es')));

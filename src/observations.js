@@ -2,13 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { profileSchema, activeSchema, captureSchema, saveSchema, inferenceSchema, validateExtraction, normalize, modalities } from './observation-schema.js';
 import { assessObservation, confidencePolicy, nextFollowUp } from './confidence.js';
+import { installedBase } from './installed-base.js';
+import { RequestError } from './request-error.js';
 
 const followUpAnswerSchema = z.object({ answer: z.union([z.string().trim().min(1).max(300), z.number(), z.null()]) }).strict();
-
-export class RequestError extends Error {
-  /** @param {number} status @param {string} message */
-  constructor(status, message) { super(message); this.status = status; }
-}
 
 /** @param {import('node:sqlite').DatabaseSync} db @param {import('./observation-schema.js').TextExtractor} extractText @param {() => Date} now @param {(record: any) => string[]} confirmationResolver */
 export function observationApi(db, extractText, now = () => new Date(), confirmationResolver = () => []) {
@@ -19,6 +16,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
     CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS observations (id TEXT PRIMARY KEY, draft_id TEXT UNIQUE NOT NULL, hospital_id TEXT NOT NULL, data TEXT NOT NULL);
   `);
+  const base = installedBase(db, now);
   /** @param {string} id */
   function profile(id) {
     const row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(id);
@@ -135,7 +133,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       const id = z.uuid().parse(path.slice('/api/hospitals/'.length));
       const hospital = db.prepare('SELECT * FROM hospitals WHERE id = ?').get(id);
       if (!hospital) throw new RequestError(404, 'El hospital no existe.');
-      return { ...hospital, observations: db.prepare('SELECT data FROM observations WHERE hospital_id = ? ORDER BY rowid DESC').all(id).map(row => presentObservation(JSON.parse(String(row.data)))) };
+      return { ...hospital, installedBase: base.present(id), observations: db.prepare('SELECT data FROM observations WHERE hospital_id = ? ORDER BY rowid DESC').all(id).map(row => presentObservation(JSON.parse(String(row.data)))) };
     }
     if (path === '/api/observations' && method === 'POST') {
       const input = saveSchema.parse(body);
@@ -158,6 +156,8 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
           profile: draft.profile, provenance: draft.provenance,
           capturedAt: draft.capturedAt, createdAt: now().toISOString() };
         db.prepare('INSERT INTO observations VALUES (?, ?, ?, ?)').run(observation.id, input.draftId, observation.hospitalId, JSON.stringify(observation));
+        if (input.splitGroupId) base.splitFromObservation(input.splitGroupId, observation);
+        else base.projectObservation(observation);
         db.exec('COMMIT');
         return presentObservation(observation);
       } catch (error) { db.exec('ROLLBACK'); throw error; }

@@ -4,7 +4,8 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
-import { observationApi, RequestError } from './observations.js';
+import { observationApi } from './observations.js';
+import { RequestError } from './request-error.js';
 
 /** @param {{ dataDirectory: string, port: number, probeQvac: () => Promise<{state: string, message: string}>, qvacStatus?: () => {state: string, message: string}, extractText?: import('./observation-schema.js').TextExtractor, now?: () => Date, confirmationResolver?: (record: any) => string[] }} options */
 export async function startApplication({ dataDirectory, port, probeQvac, qvacStatus, extractText = async () => { throw new Error('QVAC no configurado'); }, now = () => new Date(), confirmationResolver = () => [] }) {

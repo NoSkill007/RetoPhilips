@@ -18,7 +18,9 @@ export const inferenceSchema = z.object({ engine: z.string(), model: z.string(),
 export const profileSchema = z.object({ name: z.string().trim().min(1).max(80), role: z.enum(roles) }).strict();
 export const activeSchema = z.object({ profileId: z.uuid() }).strict();
 export const captureSchema = z.object({ text: z.string().max(8000).refine(value => value.trim().length >= 5) }).strict();
-export const saveSchema = z.object({ draftId: z.uuid(), reviewed: reviewedSchema, hospitalId: z.uuid().nullable() }).strict();
+export const saveSchema = z.object({
+  draftId: z.uuid(), reviewed: reviewedSchema, hospitalId: z.uuid().nullable(), splitGroupId: z.uuid().nullable().optional(),
+}).strict();
 /** @typedef {z.infer<typeof reviewedSchema>} ReviewedObservation */
 /** @typedef {{fields: unknown, metadata: z.infer<typeof inferenceSchema>}} Extraction */
 /** @typedef {{attempt: number, correctiveInstruction?: string}} ExtractionOptions */

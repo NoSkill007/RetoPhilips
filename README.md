@@ -29,6 +29,8 @@ SiteSignal formula hasta tres preguntas, una por vez, en este orden: hospital, m
 
 La confianza suma hasta 40 puntos de completitud (hospital 8; por equipo: modalidad 8, cantidad 8, fabricante 5, modelo 5 y antigüedad 6), 25 de vigencia que disminuyen linealmente hasta cero al cumplir doce meses y 35 según la proporción de esos campos respaldada por evidencia o confirmación independiente. Las bandas son Baja 0–49, Media 50–79 y Alta 80–100. El número de serie y el área conservan su estado, pero no reducen el puntaje porque pueden no aplicar.
 
+Una cantidad conjunta se incorpora a la base instalada como un grupo, sin crear números de serie ni identidades ficticias. Para identificar una unidad, registra una nueva observación con cantidad 1 y número de serie, selecciona el hospital existente y relaciónala con el grupo durante la revisión. La unidad conserva la observación original y la nueva como procedencia; el grupo restante mantiene su fuente y reduce su cantidad sin alterar el total.
+
 Variables opcionales: `SITESIGNAL_PORT` (1–65535), `SITESIGNAL_DATA` (directorio de almacenamiento). `SITESIGNAL_MODEL` debe configurarse en cada terminal nueva o persistirse mediante la configuración de entorno de Windows. Un modelo ausente permite abrir la interfaz con instrucciones de recuperación; un puerto ocupado o almacenamiento sin permisos impide arrancar y produce un mensaje en terminal. No se modifica ni elimina la base existente.
 
 ## Validación
