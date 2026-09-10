@@ -58,18 +58,27 @@ export function createTextRuntime(modelPath) {
       worker.once('exit', stopped);
     });
   }
+  /** @param {object} message @param {string} busyMessage @param {string} timeoutMessage */
+  async function infer(message, busyMessage, timeoutMessage) {
+    startup ??= initialize();
+    await startup;
+    if (state.state !== 'ready' || !worker?.connected) throw new Error(state.message);
+    if (pending) throw new Error(busyMessage);
+    return new Promise((resolve, reject) => {
+      pending = { resolve, reject, timer: setTimeout(() => fail(timeoutMessage), 90_000) };
+      worker?.send(message, error => { if (error) fail('No se pudo comunicar con QVAC. Reinicia SiteSignal.'); });
+    });
+  }
   return {
     status: () => state,
     probe() { startup ??= initialize(); return startup; },
     /** @param {string} text @param {import('./observation-schema.js').ExtractionOptions} [options] */
     async extract(text, options = { attempt: 1 }) {
-      await this.probe();
-      if (state.state !== 'ready' || !worker?.connected) throw new Error(state.message);
-      if (pending) throw new Error('Hay una extracción en curso.');
-      return new Promise((resolve, reject) => {
-        pending = { resolve, reject, timer: setTimeout(() => fail('La extracción superó 90 segundos. Reinicia y prueba un texto más corto.'), 90_000) };
-        worker?.send({ text, ...options }, error => { if (error) fail('No se pudo comunicar con QVAC. Reinicia SiteSignal.'); });
-      });
+      return infer({ text, ...options }, 'Hay una extracción en curso.', 'La extracción superó 90 segundos. Reinicia y prueba un texto más corto.');
+    },
+    /** @param {string} question */
+    async interpretQuery(question) {
+      return infer({ task: 'natural-query', text: question }, 'Hay una inferencia local en curso.', 'La consulta superó 90 segundos. Reinicia e inténtalo de nuevo.');
     },
     close() { closed = true; fail('QVAC detenido.'); },
   };

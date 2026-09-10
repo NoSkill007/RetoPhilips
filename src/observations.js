@@ -5,6 +5,7 @@ import { assessObservation, confidencePolicy, nextFollowUp } from './confidence.
 import { installedBase } from './installed-base.js';
 import { RequestError } from './request-error.js';
 import { regionalPanorama } from './regional-panorama.js';
+import { naturalQuery } from './natural-query.js';
 
 const followUpAnswerSchema = z.object({ answer: z.union([z.string().trim().min(1).max(300), z.number(), z.null()]) }).strict();
 const duplicateDecisionSchema = z.object({ decision: z.enum(['keep-separate', 'consolidate']) }).strict();
@@ -13,8 +14,8 @@ const correctionSchema = z.object({ field: z.enum(['modality', 'quantity', 'manu
 const conflictResolutionSchema = z.object({ value: z.union([z.string().trim().min(1).max(300), z.number()]),
   explanation: z.string().trim().min(3).max(500) }).strict();
 
-/** @param {import('node:sqlite').DatabaseSync} db @param {import('./observation-schema.js').TextExtractor} extractText @param {() => Date} now @param {(record: any) => string[]} confirmationResolver */
-export function observationApi(db, extractText, now = () => new Date(), confirmationResolver = () => []) {
+/** @param {import('node:sqlite').DatabaseSync} db @param {import('./observation-schema.js').TextExtractor} extractText @param {() => Date} now @param {(record: any) => string[]} confirmationResolver @param {(question: string) => Promise<{fields: unknown, metadata: unknown}>} interpretQuery */
+export function observationApi(db, extractText, now = () => new Date(), confirmationResolver = () => [], interpretQuery = async () => { throw new RequestError(503, 'El intérprete local de consultas no está disponible.'); }) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -24,6 +25,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
   `);
   const base = installedBase(db, now);
   const regional = regionalPanorama(db, now);
+  const query = naturalQuery(regional, interpretQuery);
   /** @param {string} id */
   function profile(id) {
     const row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(id);
@@ -51,6 +53,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
   /** @param {string} method @param {string} path @param {unknown} body */
   return async function handle(method, path, body) {
     if (new URL(path, 'http://sitesignal.local').pathname === '/api/panorama' || path === '/api/demo/reset') return regional.handle(method, path);
+    if (path === '/api/natural-query' && method === 'POST') return query(body);
     if (path === '/api/profiles' && method === 'GET') return {
       profiles: db.prepare('SELECT * FROM profiles ORDER BY name').all(),
       activeProfileId: db.prepare("SELECT value FROM preferences WHERE key = 'activeProfile'").get()?.value ?? null,

@@ -12,6 +12,7 @@ try {
   const app = await startApplication({
     dataDirectory: process.env.SITESIGNAL_DATA ?? fileURLToPath(new URL('../data', import.meta.url)),
     port, probeQvac: () => runtime.probe(), qvacStatus: runtime.status, extractText: (text, options) => runtime.extract(text, options),
+    interpretQuery: question => runtime.interpretQuery(question),
   });
   console.log(`SiteSignal disponible en ${app.url}. Ctrl+C para detener.`);
   process.send?.({ url: app.url });

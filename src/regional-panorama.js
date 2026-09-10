@@ -111,9 +111,18 @@ export function regionalPanorama(db, now = () => new Date()) {
   function dataset() { return { id: DATASET_ID, label: 'Dataset sintético ficticio para demostración', fictional: true, hospitals: 10, equipment: 60 }; }
   /** @param {URLSearchParams} params */
   function panorama(params) {
-    const all = [...rows(), ...capturedRows()].map(record => ({ ...record, confidence: assessmentFor(record, now()).confidence.score }));
-    const selected = Object.fromEntries(['client', 'hospital', 'country', 'city', 'modality'].map(key => [key, params.get(key) ?? '']));
-    const filtered = all.filter(record => Object.entries(selected).every(([key, value]) => !value || String(record[key === 'hospital' ? 'hospitalId' : key]) === value));
+    const all = [...rows(), ...capturedRows()].map(record => { const assessment = assessmentFor(record, now()); return { ...record, confidence: assessment.confidence.score, state: assessment.overallState }; });
+    const selected = Object.fromEntries(['client', 'hospital', 'country', 'city', 'modality', 'state', 'confidence', 'freshness'].map(key => [key, params.get(key) ?? '']));
+    /** @param {string} key */
+    const parseAgeFilter = (key) => { const value = params.get(key); if (value === null || value === '') return null; const parsed = Number(value); if (!Number.isFinite(parsed) || parsed < 0 || parsed > 150) throw new RequestError(400, `El filtro ${key} no es válido.`); return parsed; };
+    const minAge = parseAgeFilter('minAge'); const maxAge = parseAgeFilter('maxAge');
+    const filtered = all.filter(record => Object.entries(selected).every(([key, value]) => {
+      if (!value) return true;
+      if (key === 'hospital') return record.hospitalId === value;
+      if (key === 'confidence') return confidenceBand(record.confidence).startsWith(value);
+      if (key === 'freshness') return value === (stale(record, now()) ? 'Desactualizada' : 'Vigente');
+      return String(record[key]) === value;
+    }) && (minAge === null || (record.age !== null && record.age !== undefined && record.age >= minAge)) && (maxAge === null || (record.age !== null && record.age !== undefined && record.age <= maxAge)));
     const hospitalRows = new Map();
     for (const record of filtered) {
       const current = hospitalRows.get(record.hospitalId) ?? { id: record.hospitalId, name: record.hospital, client: record.client, country: record.country, city: record.city, area: record.area ?? null, fictional: record.fictional, source: record.fictional ? 'Dataset sintético ficticio' : 'Captura local', equipmentCount: 0, confidenceTotal: 0, staleInformation: 0, potentialOpportunities: 0 };
@@ -125,7 +134,7 @@ export function regionalPanorama(db, now = () => new Date()) {
     const summaries = [...hospitalRows.values()].map(item => ({ ...item, averageConfidence: Math.round(item.confidenceTotal / item.equipmentCount), confidenceTotal: undefined })).sort((a, b) => a.name.localeCompare(b.name, 'es'));
     const countries = aggregate(filtered.filter(record => ['Panamá', 'Brasil', 'Colombia'].includes(record.country)), record => record.country).map(item => ({ country: item.value, equipment: item.count, hospitals: new Set(filtered.filter(record => record.country === item.value).map(record => record.hospitalId)).size }));
     return {
-      dataset: dataset(), selected,
+      dataset: dataset(), selected: { ...selected, minAge: minAge ?? '', maxAge: maxAge ?? '' },
       filters: {
         clients: [...new Set(all.map(row => row.client))].sort(),
         hospitals: [...new Map(all.map(row => [row.hospitalId, { id: row.hospitalId, name: row.hospital }])).values()].sort((a, b) => a.name.localeCompare(b.name, 'es')),
@@ -167,5 +176,5 @@ export function regionalPanorama(db, now = () => new Date()) {
     if (url.pathname === '/api/demo/reset' && method === 'POST') return reset();
     throw new RequestError(404, 'Ruta regional no disponible.');
   }
-  return { handle, hospital, reset };
+  return { handle, hospital, reset, panorama };
 }

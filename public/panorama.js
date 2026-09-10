@@ -8,6 +8,9 @@ async function api(path, body) {
   const result = await response.json(); if (!response.ok) throw new Error(result.error ?? 'No se pudo cargar el panorama.'); return result;
 }
 const form = /** @type {HTMLFormElement} */ (el('panorama-filters'));
+const queryForm = /** @type {HTMLFormElement} */ (el('natural-query-form'));
+/** @type {any} */
+let lastQuery = null;
 /** @param {HTMLSelectElement} select @param {Array<string | {id:string,name:string}>} values */
 function options(select, values) {
   const current = select.value; const first = select.options[0]; select.replaceChildren(first);
@@ -54,8 +57,50 @@ async function load() {
   for (const [key, value] of [...params]) if (!value) params.delete(key);
   render(await api('/api/panorama?' + params));
 }
-form.addEventListener('change', () => load().catch(console.error));
-form.addEventListener('reset', () => setTimeout(() => load().catch(console.error)));
+/** @returns {Record<string, string | number>} */
+function activeFilters() {
+  /** @type {Record<string, string | number>} */
+  const result = {};
+  for (const [key, value] of new FormData(form)) if (String(value)) result[key] = ['minAge', 'maxAge'].includes(key) ? Number(value) : String(value);
+  return result;
+}
+function renderQuery() {
+  if (!lastQuery) return;
+  const panel = el('natural-query-result'); panel.hidden = false; el('query-explanation').textContent = lastQuery.explanation;
+  el('query-limitations').textContent = lastQuery.limitations; const chips = el('query-chips'); chips.replaceChildren();
+  /** @type {Record<string, string>} */
+  const labels = { country: 'País', city: 'Ciudad', client: 'Cliente', hospital: 'Hospital', modality: 'Modalidad', minAge: 'Edad mínima', maxAge: 'Edad máxima', state: 'Estado', confidence: 'Confianza', freshness: 'Vigencia' };
+  for (const [key, value] of Object.entries(lastQuery.filters)) {
+    const control = /** @type {HTMLInputElement | HTMLSelectElement} */ (form.elements.namedItem(key));
+    const displayValue = control instanceof HTMLSelectElement ? control.selectedOptions[0]?.textContent ?? String(value) : String(value);
+    const chip = document.createElement('button'); chip.type = 'button'; chip.textContent = `${labels[key]}: ${displayValue} ×`; chip.setAttribute('aria-label', `Quitar filtro ${labels[key]} ${displayValue}`);
+    chip.addEventListener('click', () => { const control = /** @type {HTMLInputElement | HTMLSelectElement} */ (form.elements.namedItem(key)); control.value = ''; lastQuery.filters = activeFilters(); lastQuery.explanation = 'Quitaste un filtro interpretado. El panorama muestra la combinación restante.'; renderQuery(); load().catch(console.error); });
+    chips.append(chip);
+  }
+  if (!Object.keys(lastQuery.filters).length && lastQuery.status === 'applied') chips.append(node('span', 'No quedan filtros interpretados.'));
+}
+queryForm.addEventListener('submit', async event => {
+  event.preventDefault(); const button = /** @type {HTMLButtonElement} */ (queryForm.querySelector('button')); button.disabled = true;
+  try {
+    const question = String(new FormData(queryForm).get('question') ?? ''); lastQuery = await api('/api/natural-query', { question });
+    if (lastQuery.status === 'applied') {
+      for (const element of form.elements) if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement) element.value = '';
+      for (const [key, value] of Object.entries(lastQuery.filters)) { const control = /** @type {HTMLInputElement | HTMLSelectElement} */ (form.elements.namedItem(key)); if (control) control.value = String(value); }
+      await load();
+    }
+    renderQuery();
+  } catch (error) { lastQuery = { status: 'unsupported', filters: {}, explanation: error instanceof Error ? error.message : 'No se pudo interpretar la pregunta.', limitations: 'Prueba una pregunta que describa filtros del panorama.' }; renderQuery(); }
+  finally { button.disabled = false; }
+});
+form.addEventListener('change', () => { if (lastQuery?.status === 'applied') { lastQuery.filters = activeFilters(); lastQuery.explanation = 'Ajustaste manualmente los filtros interpretados. El panorama ya refleja los cambios.'; renderQuery(); } load().catch(console.error); });
+form.addEventListener('reset', () => setTimeout(() => {
+  if (lastQuery?.status === 'applied') {
+    lastQuery.filters = {};
+    lastQuery.explanation = 'Quitaste todos los filtros interpretados. El panorama vuelve a mostrar la región completa.';
+    renderQuery();
+  }
+  load().catch(console.error);
+}));
 for (const shape of el('regional-map').querySelectorAll('[data-country]')) {
   const activate = () => { const country = /** @type {HTMLSelectElement} */ (form.elements.namedItem('country')); country.value = shape.getAttribute('data-country') ?? ''; load().catch(console.error); };
   shape.addEventListener('click', activate);
