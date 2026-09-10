@@ -31,6 +31,8 @@ La confianza suma hasta 40 puntos de completitud (hospital 8; por equipo: modali
 
 Una cantidad conjunta se incorpora a la base instalada como un grupo, sin crear números de serie ni identidades ficticias. Para identificar una unidad, registra una nueva observación con cantidad 1 y número de serie, selecciona el hospital existente y relaciónala con el grupo durante la revisión. La unidad conserva la observación original y la nueva como procedencia; el grupo restante mantiene su fuente y reduce su cantidad sin alterar el total.
 
+SiteSignal presenta una serie idéntica como coincidencia fuerte. Sin serie, sugiere candidatos cuando coinciden el hospital, la modalidad y al menos otro dato entre fabricante, modelo, cantidad o antigüedad aproximada. La comparación muestra coincidencias y diferencias; solo una decisión explícita permite consolidar. Conservar separados no modifica la base instalada, mientras que consolidar elimina el conteo duplicado y mantiene todas las observaciones originales.
+
 Variables opcionales: `SITESIGNAL_PORT` (1–65535), `SITESIGNAL_DATA` (directorio de almacenamiento). `SITESIGNAL_MODEL` debe configurarse en cada terminal nueva o persistirse mediante la configuración de entorno de Windows. Un modelo ausente permite abrir la interfaz con instrucciones de recuperación; un puerto ocupado o almacenamiento sin permisos impide arrancar y produce un mensaje en terminal. No se modifica ni elimina la base existente.
 
 ## Validación

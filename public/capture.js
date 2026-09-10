@@ -222,6 +222,14 @@ async function loadHospitals() {
     button.addEventListener('click', () => showHospital(hospital.id).catch(report)); el('hospital-list').append(button);
   }
 }
+/** @param {string} hospitalId @param {string} candidateId @param {'keep-separate' | 'consolidate'} decision */
+async function decideDuplicate(hospitalId, candidateId, decision) {
+  try {
+    await api(`/api/duplicate-candidates/${candidateId}/decision`, { decision });
+    await showHospital(hospitalId);
+    feedback(decision === 'consolidate' ? 'Equipos consolidados con toda su procedencia.' : 'Los equipos se conservaron separados.');
+  } catch (error) { report(error); }
+}
 /** @param {string} id */
 async function showHospital(id) {
   const hospital = await api('/api/hospitals/' + id); const target = el('hospital-view'); target.replaceChildren();
@@ -239,7 +247,36 @@ async function showHospital(id) {
     if (item.splitHistory.length) card.append(node('p', `Separaciones revisadas: ${item.splitHistory.length} · última por ${item.splitHistory.at(-1).profile.name}`));
     base.append(card);
   }
-  target.append(base, node('h3', 'Observaciones que sustentan la base instalada'));
+  target.append(base);
+  if (hospital.installedBase.duplicateCandidates.length) {
+    target.append(node('h3', 'Candidatos a duplicado pendientes'));
+    /** @type {Record<string, string>} */
+    /** @type {Record<string, string>} */
+    const labels = { hospital: 'Hospital', modality: 'Modalidad', manufacturer: 'Fabricante', model: 'Modelo', quantity: 'Cantidad', age: 'Antigüedad aproximada', serial: 'Número de serie' };
+    for (const candidate of hospital.installedBase.duplicateCandidates) {
+      const review = document.createElement('article'); review.className = `duplicate-candidate ${candidate.kind}`;
+      review.append(node('p', candidate.kind === 'serial' ? 'COINCIDENCIA FUERTE POR SERIE' : 'COINCIDENCIA APROXIMADA'));
+      review.append(node('h4', candidate.items.map(/** @param {any} item */ item => `${item.modality ?? 'Modalidad desconocida'} · ${item.serial ?? `grupo de ${item.quantity ?? '?'}`}`).join(' ↔ ')));
+      const columns = document.createElement('div'); columns.className = 'candidate-comparison';
+      const matches = document.createElement('div'); matches.append(node('strong', 'Coincide'));
+      const matchList = document.createElement('ul');
+      for (const match of candidate.matchingFields) matchList.append(node('li', `${labels[match.field]}: ${match.field === 'hospital' ? hospital.name : match.left}`));
+      matches.append(matchList); columns.append(matches);
+      const conflicts = document.createElement('div'); conflicts.append(node('strong', 'Difiere'));
+      if (!candidate.conflictingFields.length) conflicts.append(node('p', 'Sin diferencias conocidas'));
+      else {
+        const conflictList = document.createElement('ul');
+        for (const conflict of candidate.conflictingFields) conflictList.append(node('li', `${labels[conflict.field]}: ${conflict.left} ↔ ${conflict.right}`));
+        conflicts.append(conflictList);
+      }
+      columns.append(conflicts); review.append(columns);
+      const actions = document.createElement('div'); actions.className = 'candidate-actions';
+      const separate = document.createElement('button'); separate.textContent = 'Conservar separados'; separate.addEventListener('click', () => decideDuplicate(id, candidate.id, 'keep-separate'));
+      const consolidate = document.createElement('button'); consolidate.className = 'primary'; consolidate.textContent = 'Consolidar'; consolidate.addEventListener('click', () => decideDuplicate(id, candidate.id, 'consolidate'));
+      actions.append(separate, consolidate); review.append(actions); target.append(review);
+    }
+  }
+  target.append(node('h3', 'Observaciones que sustentan la base instalada'));
   for (const observation of hospital.observations) {
     const article = document.createElement('article');
     article.append(node('h3', `${observation.profile.name} · ${observation.profile.role}`), node('p', new Date(observation.createdAt).toLocaleString('es')));

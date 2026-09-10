@@ -6,6 +6,7 @@ import { installedBase } from './installed-base.js';
 import { RequestError } from './request-error.js';
 
 const followUpAnswerSchema = z.object({ answer: z.union([z.string().trim().min(1).max(300), z.number(), z.null()]) }).strict();
+const duplicateDecisionSchema = z.object({ decision: z.enum(['keep-separate', 'consolidate']) }).strict();
 
 /** @param {import('node:sqlite').DatabaseSync} db @param {import('./observation-schema.js').TextExtractor} extractText @param {() => Date} now @param {(record: any) => string[]} confirmationResolver */
 export function observationApi(db, extractText, now = () => new Date(), confirmationResolver = () => []) {
@@ -59,6 +60,18 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       return { activeProfileId: profileId };
     }
     if (path === '/api/confidence-policy' && method === 'GET') return confidencePolicy;
+    const duplicateDecisionMatch = path.match(/^\/api\/duplicate-candidates\/([0-9a-f-]+)\/decision$/);
+    if (duplicateDecisionMatch && method === 'POST') {
+      const candidateId = z.uuid().parse(duplicateDecisionMatch[1]);
+      const { decision } = duplicateDecisionSchema.parse(body);
+      const active = db.prepare("SELECT value FROM preferences WHERE key = 'activeProfile'").get();
+      if (!active) throw new RequestError(409, 'Selecciona un perfil de colaborador para revisar el candidato.');
+      db.exec('BEGIN');
+      try {
+        const result = base.decideDuplicate(candidateId, decision, profile(String(active.value)));
+        db.exec('COMMIT'); return result;
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+    }
     if (path === '/api/drafts' && method === 'POST') {
       const { text } = captureSchema.parse(body);
       const capturedAt = now().toISOString();
