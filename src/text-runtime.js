@@ -61,14 +61,14 @@ export function createTextRuntime(modelPath) {
   return {
     status: () => state,
     probe() { startup ??= initialize(); return startup; },
-    /** @param {string} text */
-    async extract(text) {
+    /** @param {string} text @param {import('./observation-schema.js').ExtractionOptions} [options] */
+    async extract(text, options = { attempt: 1 }) {
       await this.probe();
       if (state.state !== 'ready' || !worker?.connected) throw new Error(state.message);
       if (pending) throw new Error('Hay una extracción en curso.');
       return new Promise((resolve, reject) => {
         pending = { resolve, reject, timer: setTimeout(() => fail('La extracción superó 90 segundos. Reinicia y prueba un texto más corto.'), 90_000) };
-        worker?.send({ text }, error => { if (error) fail('No se pudo comunicar con QVAC. Reinicia SiteSignal.'); });
+        worker?.send({ text, ...options }, error => { if (error) fail('No se pudo comunicar con QVAC. Reinicia SiteSignal.'); });
       });
     },
     close() { closed = true; fail('QVAC detenido.'); },

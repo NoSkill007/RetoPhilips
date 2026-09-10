@@ -23,6 +23,8 @@ La API y todos los recursos de interfaz se sirven desde `http://127.0.0.1:3210`.
 
 SQLite se crea en `data/sitesignal.db`, relativo al repositorio, y conserva el identificador de instalación y el contador de arranques. Detén con Ctrl+C. Para verificar persistencia, reinicia y compara el identificador y contador visibles.
 
+Cada extracción se valida contra un schema estricto, el catálogo de modalidades y la cláusula del relato asociada a cada equipo. Los valores sin respaldo se rechazan. Si la primera salida de QVAC es inválida, SiteSignal hace un único reintento con instrucciones correctivas. Tras un segundo fallo abre tarjetas vacías para captura manual, conserva el relato original y registra procedencia `Manual`.
+
 Variables opcionales: `SITESIGNAL_PORT` (1–65535), `SITESIGNAL_DATA` (directorio de almacenamiento). `SITESIGNAL_MODEL` debe configurarse en cada terminal nueva o persistirse mediante la configuración de entorno de Windows. Un modelo ausente permite abrir la interfaz con instrucciones de recuperación; un puerto ocupado o almacenamiento sin permisos impide arrancar y produce un mensaje en terminal. No se modifica ni elimina la base existente.
 
 ## Validación

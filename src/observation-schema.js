@@ -21,7 +21,8 @@ export const captureSchema = z.object({ text: z.string().max(8000).refine(value 
 export const saveSchema = z.object({ draftId: z.uuid(), reviewed: reviewedSchema, hospitalId: z.uuid().nullable() }).strict();
 /** @typedef {z.infer<typeof reviewedSchema>} ReviewedObservation */
 /** @typedef {{fields: unknown, metadata: z.infer<typeof inferenceSchema>}} Extraction */
-/** @typedef {(text: string) => Promise<Extraction>} TextExtractor */
+/** @typedef {{attempt: number, correctiveInstruction?: string}} ExtractionOptions */
+/** @typedef {(text: string, options?: ExtractionOptions) => Promise<Extraction>} TextExtractor */
 
 /** @param {string} value */
 export function normalize(value) { return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
@@ -41,7 +42,8 @@ function modality(value) {
   const text = normalize(value);
   const patterns = [/resonancia|\bmri?\b|magnetic/, /tomograf|\bct\b|computed tomography/, /ultra|\bus\b/, /monitor/, /rayos|x.ray/, /interven/];
   const index = patterns.findIndex(pattern => pattern.test(text));
-  return modalities[index === -1 ? 6 : index];
+  if (index >= 0) return modalities[index];
+  return /\botro\b|\bother\b/.test(text) ? modalities[6] : null;
 }
 /** @param {string | null} value */
 function ageInYears(value) {
@@ -50,7 +52,7 @@ function ageInYears(value) {
 /** Retain only literal source-backed strings; semantic validation expands in #4.
  * @param {unknown} raw @param {string} source
  */
-export function reviewExtraction(raw, source) {
+export function validateExtraction(raw, source) {
   const fields = rawSchema.parse(raw);
   const normalizedSource = normalize(source);
   /** @param {string} value */
@@ -130,10 +132,27 @@ export function reviewExtraction(raw, source) {
     };
   });
   const unique = equipment.filter((item, index) => equipment.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(item)) === index);
-  return reviewedSchema.parse({
+  const reviewed = reviewedSchema.parse({
     client: anchored(fields.client, 'cliente|client|organizacion|organization'),
     hospital: anchored(fields.hospital, 'hospital|clinica|clinic|centro medico|medical center'),
     area: anchored(fields.area, 'area|departamento|department|edificio|building'),
     equipment: unique,
   });
+  const issues = [];
+  const locationLabels = { client: 'Cliente', hospital: 'Hospital', area: 'Área' };
+  for (const key of /** @type {const} */ (['client', 'hospital', 'area'])) {
+    if (fields[key] !== null && reviewed[key] === null) issues.push(`${locationLabels[key]} rechazado: no está respaldado en ese contexto del relato.`);
+  }
+  const equipmentLabels = { modality: 'Modalidad', quantity: 'Cantidad', manufacturer: 'Fabricante', model: 'Modelo', serial: 'Número de serie', age: 'Antigüedad' };
+  fields.equipment.forEach((item, index) => {
+    const accepted = equipment[index];
+    if (!accepted) return;
+    for (const key of /** @type {const} */ (['modality', 'quantity', 'manufacturer', 'model', 'serial', 'age'])) {
+      if (item[key] !== null && accepted[key] === null) issues.push(`${equipmentLabels[key]} del equipo ${index + 1} rechazado: no está respaldado en su cláusula o no pertenece al catálogo permitido.`);
+    }
+  });
+  return { reviewed, issues };
 }
+
+/** @param {unknown} raw @param {string} source */
+export function reviewExtraction(raw, source) { return validateExtraction(raw, source).reviewed; }

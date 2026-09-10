@@ -79,7 +79,18 @@ function renderReview() {
   option(target, 'new', 'Crear un hospital con los datos revisados');
   for (const hospital of hospitals) option(target, hospital.id, `${draft.candidates.some(/** @param {{id: string}} c */ c => c.id === hospital.id) ? 'Posible coincidencia · ' : ''}${hospital.name} · ${hospital.client ?? 'Cliente desconocido'}`);
   target.value = draft.candidates.length ? '' : 'new';
-  el('inference-info').textContent = `${draft.inference.engine} · ${draft.inference.model} · ${(draft.inference.durationMs / 1000).toFixed(1)} s de inferencia`;
+  const notice = el('validation-notice'); notice.replaceChildren();
+  if (draft.mode === 'manual') {
+    notice.hidden = false; notice.append(node('h3', 'Captura manual activada'), node('p', 'QVAC falló dos veces. El relato original está intacto; completa solo los datos que puedas revisar.'));
+  } else if (draft.retryCorrected) {
+    notice.hidden = false; notice.append(node('h3', 'Extracción corregida'), node('p', 'La primera salida no fue válida. QVAC corrigió la extracción en el segundo y último intento.'));
+  } else notice.hidden = true;
+  if (!notice.hidden && draft.validationIssues.length) {
+    const list = document.createElement('ul');
+    for (const issue of draft.validationIssues) list.append(node('li', issue));
+    notice.append(list);
+  }
+  el('inference-info').textContent = draft.mode === 'manual' ? 'Procedencia: captura manual · La IA no produjo el resultado guardado.' : `${draft.inference.engine} · ${draft.inference.model} · ${(draft.inference.durationMs / 1000).toFixed(1)} s de inferencia · ${draft.attempts} intento${draft.attempts === 1 ? '' : 's'}`;
   el('review').hidden = false; el('review').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 select('hospital-choice').addEventListener('change', () => {
@@ -101,7 +112,8 @@ form('capture-form').addEventListener('submit', async event => {
   feedback('QVAC está leyendo tu observación en esta computadora…');
   try {
     draft = await api('/api/drafts', { text: input.value });
-    hospitals = await api('/api/hospitals'); renderReview(); feedback('Extracción lista. Revisa los datos antes de guardarlos.');
+    hospitals = await api('/api/hospitals'); renderReview();
+    feedback(draft.mode === 'manual' ? 'QVAC falló dos veces. Completa la captura manual sin perder tu relato.' : 'Extracción lista. Revisa los datos antes de guardarlos.', draft.mode === 'manual');
   } catch (error) { report(error); }
   finally { button.disabled = false; input.readOnly = false; }
 });

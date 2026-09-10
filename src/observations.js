@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { profileSchema, activeSchema, captureSchema, saveSchema, inferenceSchema, reviewExtraction, normalize } from './observation-schema.js';
+import { profileSchema, activeSchema, captureSchema, saveSchema, inferenceSchema, validateExtraction, normalize } from './observation-schema.js';
 
 export class RequestError extends Error {
   /** @param {number} status @param {string} message */
@@ -42,18 +42,37 @@ export function observationApi(db, extractText) {
     }
     if (path === '/api/drafts' && method === 'POST') {
       const { text } = captureSchema.parse(body);
+      const capturedAt = new Date().toISOString();
       const active = db.prepare("SELECT value FROM preferences WHERE key = 'activeProfile'").get();
       if (!active) throw new RequestError(409, 'Crea y selecciona un perfil de colaborador antes de capturar.');
       const collaborator = profile(String(active.value));
-      let extraction;
-      try { extraction = await extractText(text); }
-      catch { throw new RequestError(503, 'No se pudo extraer con QVAC. Tu texto sigue en pantalla; revisa el entorno e inténtalo de nuevo.'); }
-      let reviewed;
-      let inference;
-      try { reviewed = reviewExtraction(extraction.fields, text); inference = inferenceSchema.parse(extraction.metadata); }
-      catch { throw new RequestError(422, 'QVAC devolvió una extracción no válida. Conserva el texto e inténtalo de nuevo.'); }
-      const draft = { id: randomUUID(), originalText: text, reviewed, extracted: extraction.fields, profile: collaborator,
-        inference, capturedAt: new Date().toISOString() };
+      const validationIssues = [];
+      let validResult;
+      let attempts = 0;
+      for (attempts = 1; attempts <= 2; attempts += 1) {
+        try {
+          const extraction = await extractText(text, { attempt: attempts,
+            ...(attempts === 2 ? { correctiveInstruction: 'Corrige la salida anterior: respeta el schema completo, copia solo afirmaciones respaldadas por su cláusula y usa únicamente modalidades permitidas.' } : {}) });
+          const inference = inferenceSchema.parse(extraction.metadata);
+          const validation = validateExtraction(extraction.fields, text);
+          if (validation.issues.length) {
+            validationIssues.push(...validation.issues);
+            continue;
+          }
+          validResult = { extraction, inference, reviewed: validation.reviewed };
+          break;
+        } catch {
+          validationIssues.push(`Intento ${attempts}: QVAC no devolvió el schema completo y válido.`);
+        }
+      }
+      const manual = !validResult;
+      const reviewed = validResult?.reviewed ?? { client: null, hospital: null, area: null, equipment: [
+        { modality: null, quantity: null, manufacturer: null, model: null, serial: null, age: null },
+      ] };
+      const draft = { id: randomUUID(), mode: manual ? 'manual' : 'qvac', originalText: text, reviewed,
+        extracted: validResult?.extraction.fields ?? null, profile: collaborator,
+        inference: validResult?.inference ?? { engine: 'Manual', model: 'No aplicado', durationMs: 0 },
+        capturedAt, attempts: Math.min(attempts, 2), retryCorrected: Boolean(validResult && attempts === 2), validationIssues: [...new Set(validationIssues)] };
       db.prepare('INSERT INTO drafts VALUES (?, ?)').run(draft.id, JSON.stringify(draft));
       const hospitals = db.prepare('SELECT * FROM hospitals ORDER BY name').all();
       const needle = normalize(reviewed.hospital ?? '');
@@ -85,7 +104,9 @@ export function observationApi(db, extractText) {
         }
         const observation = { id: randomUUID(), hospitalId: hospital.id, originalText: draft.originalText,
           reviewed: { ...input.reviewed, hospital: hospital.name, client: hospital.client }, extracted: draft.extracted,
-          profile: draft.profile, inference: draft.inference, capturedAt: draft.capturedAt, createdAt: new Date().toISOString() };
+          profile: draft.profile, inference: draft.inference, mode: draft.mode, attempts: draft.attempts,
+          retryCorrected: draft.retryCorrected, validationIssues: draft.validationIssues,
+          capturedAt: draft.capturedAt, createdAt: new Date().toISOString() };
         db.prepare('INSERT INTO observations VALUES (?, ?, ?, ?)').run(observation.id, input.draftId, observation.hospitalId, JSON.stringify(observation));
         db.exec('COMMIT');
         return observation;

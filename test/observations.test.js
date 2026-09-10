@@ -114,7 +114,9 @@ test('un dato presente en otro contexto no se atribuye al equipo', async () => {
     const profile = await post('/api/profiles', { name: 'Eva Demo', role: 'Especialista' });
     await post('/api/profiles/active', { profileId: profile.id });
     const draft = await post('/api/drafts', { text: source });
-    assert.deepEqual(draft.reviewed.equipment[0], { modality: 'Tomografía computarizada', quantity: null, manufacturer: null, model: null, serial: null, age: null });
+    assert.equal(draft.mode, 'manual');
+    assert.deepEqual(draft.reviewed.equipment[0], { modality: null, quantity: null, manufacturer: null, model: null, serial: null, age: null });
+    assert.ok(draft.validationIssues.length > 0);
   } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -136,8 +138,9 @@ test('dos equipos en la misma oración no intercambian sus datos', async () => {
     const profile = await post('/api/profiles', { name: 'Eva Demo', role: 'Especialista' });
     await post('/api/profiles/active', { profileId: profile.id });
     const draft = await post('/api/drafts', { text: source });
+    assert.equal(draft.mode, 'manual');
     assert.deepEqual(draft.reviewed.equipment.map(/** @param {{quantity: number | null, manufacturer: string | null}} item */ item => ({ quantity: item.quantity, manufacturer: item.manufacturer })), [
-      { quantity: null, manufacturer: null }, { quantity: null, manufacturer: null },
+      { quantity: null, manufacturer: null },
     ]);
   } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
 });
