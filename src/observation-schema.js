@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const roles = ['Ingeniero de servicio', 'Vendedor', 'Especialista'];
-export const modalities = ['Resonancia magnética', 'Tomografía computarizada', 'Ultrasonido', 'Monitoreo de pacientes', 'Rayos X', 'Sistema intervencionista', 'Otro'];
+export const modalities = ['Resonancia magnética', 'Tomografía computarizada', 'Ultrasonido', 'Monitoreo de pacientes', 'Rayos X', 'Sistema intervencionista', 'Mamografía', 'Medicina nuclear / PET', 'Electrocardiografía', 'Ventilación mecánica', 'Desfibrilador', 'Endoscopia', 'Otro'];
 const field = z.string().trim().min(1).max(300).nullable();
 export const rawSchema = z.object({
   client: field, hospital: field, area: field,
@@ -55,10 +55,11 @@ function numeric(value) {
 function modality(value) {
   if (!value) return null;
   const text = normalize(value);
-  const patterns = [/resonancia|\bmri?\b|magnetic/, /tomograf|\bct\b|computed tomography/, /ultra|\bus\b/, /monitor/, /rayos|x.ray/, /interven/];
+  const patterns = [/resonancia|\bmri?\b|magnetic/, /tomograf|\bct\b|computed tomography/, /ultra|\bus\b/, /monitor/, /rayos|x.ray/, /interven/,
+    /mamograf|mammogra/, /medicina nuclear|nuclear medicine|\bpet\b/, /electrocardiograf|\becg\b|\bekg\b/, /ventilad|ventilator/, /desfibrilad|defibrillat/, /endoscop/];
   const index = patterns.findIndex(pattern => pattern.test(text));
   if (index >= 0) return modalities[index];
-  return /\botro\b|\bother\b/.test(text) ? modalities[6] : null;
+  return /\botro\b|\bother\b/.test(text) ? modalities.at(-1) : null;
 }
 /** @param {string | null} value */
 function ageInYears(value) {

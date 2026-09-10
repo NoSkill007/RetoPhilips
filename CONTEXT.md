@@ -108,7 +108,7 @@ _Avoid_: Captura asistida por foto
 Nombre del producto que presenta la inteligencia de base instalada y mantiene la captura separada de cualquier marca corporativa.
 
 **Modalidad**:
-Categoría clínica del equipo: resonancia magnética, tomografía computarizada, ultrasonido, monitoreo de pacientes, rayos X, sistema intervencionista u Otro.
+Categoría clínica del equipo: resonancia magnética, tomografía computarizada, ultrasonido, monitoreo de pacientes, rayos X, sistema intervencionista, mamografía, medicina nuclear / PET, electrocardiografía, ventilación mecánica, desfibrilador, endoscopia u Otro.
 _Avoid_: Modelo, fabricante
 
 **Confianza baja**:

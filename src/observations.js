@@ -6,6 +6,7 @@ import { installedBase } from './installed-base.js';
 import { RequestError } from './request-error.js';
 import { regionalPanorama } from './regional-panorama.js';
 import { naturalQuery } from './natural-query.js';
+import { opportunities, opportunityReviewSchema } from './opportunities.js';
 
 const followUpAnswerSchema = z.object({ answer: z.union([z.string().trim().min(1).max(300), z.number(), z.null()]) }).strict();
 const duplicateDecisionSchema = z.object({ decision: z.enum(['keep-separate', 'consolidate']) }).strict();
@@ -26,6 +27,20 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
   const base = installedBase(db, now);
   const regional = regionalPanorama(db, now);
   const query = naturalQuery(regional, interpretQuery);
+  const opportunity = opportunities(db, now);
+  /** @param {string} hospitalId @param {any[]} items @param {any[]} conflicts @param {any[]} observationRows */
+  function opportunitiesForHospital(hospitalId, items, conflicts, observationRows) {
+    return items.filter(item => item.kind === 'individual' || item.kind === 'consolidated').map(item => {
+      const supporting = observationRows.filter(observation => item.sourceObservationIds.includes(observation.id));
+      const capturedAt = supporting.reduce(/** @param {string | null} latest @param {any} observation */ (latest, observation) =>
+        !latest || new Date(observation.capturedAt) > new Date(latest) ? observation.capturedAt : latest, null);
+      const assessment = base.assessItem(item, capturedAt);
+      const hasIdentityConflict = conflicts.some(conflict => conflict.itemIds?.includes(item.id));
+      return opportunity.signal({ itemId: item.id, hospitalId, modality: item.modality, manufacturer: item.manufacturer, model: item.model,
+        serial: item.serial, age: item.age, confidence: assessment.confidence.score, capturedAt, hasIdentityConflict,
+        supportingObservationIds: supporting.map(observation => observation.id) });
+    });
+  }
   /** @param {string} id */
   function profile(id) {
     const row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(id);
@@ -105,6 +120,21 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
         const result = base.decideDuplicate(candidateId, decision, profile(String(active.value)));
         db.exec('COMMIT'); return result;
       } catch (error) { db.exec('ROLLBACK'); throw error; }
+    }
+    const opportunityReviewMatch = path.match(/^\/api\/opportunities\/([0-9a-f-]+)\/review$/);
+    if (opportunityReviewMatch && method === 'POST') {
+      const itemId = z.uuid().parse(opportunityReviewMatch[1]);
+      const input = opportunityReviewSchema.parse(body);
+      const active = db.prepare("SELECT value FROM preferences WHERE key = 'activeProfile'").get();
+      if (!active) throw new RequestError(409, 'Selecciona un perfil de colaborador para revisar la oportunidad.');
+      const installedRow = db.prepare('SELECT hospital_id FROM installed_equipment WHERE id = ?').get(itemId);
+      let hospitalId = installedRow ? String(installedRow.hospital_id) : null;
+      if (!hospitalId) {
+        const demoRow = db.prepare('SELECT data FROM regional_demo_equipment WHERE id = ?').get(itemId);
+        hospitalId = demoRow ? JSON.parse(String(demoRow.data)).hospitalId : null;
+      }
+      if (!hospitalId) throw new RequestError(404, 'El equipo de la oportunidad no existe.');
+      return opportunity.decide(itemId, hospitalId, input.decision, input.note, profile(String(active.value)));
     }
     if (path === '/api/drafts' && method === 'POST') {
       const { text } = captureSchema.parse(body);
@@ -194,7 +224,10 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
         if (fictionalHospital) return fictionalHospital;
         throw new RequestError(404, 'El hospital no existe.');
       }
-      return { ...hospital, installedBase: base.present(id), observations: db.prepare('SELECT data FROM observations WHERE hospital_id = ? ORDER BY rowid DESC').all(id).map(row => presentObservation(JSON.parse(String(row.data)))) };
+      const installedBaseData = base.present(id);
+      const observationRows = db.prepare('SELECT data FROM observations WHERE hospital_id = ? ORDER BY rowid DESC').all(id).map(row => JSON.parse(String(row.data)));
+      const opportunityList = opportunitiesForHospital(id, installedBaseData.items, installedBaseData.conflicts, observationRows);
+      return { ...hospital, installedBase: { ...installedBaseData, opportunities: opportunityList }, observations: observationRows.map(observation => presentObservation(observation)) };
     }
     if (path === '/api/observations' && method === 'POST') {
       const input = saveSchema.parse(body);

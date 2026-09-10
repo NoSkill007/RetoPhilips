@@ -1,8 +1,12 @@
 import { RequestError } from './request-error.js';
 import { assessObservation } from './confidence.js';
 import { modalities } from './observation-schema.js';
+import { opportunities, isStale } from './opportunities.js';
 
 const DATASET_ID = 'sitesignal-fictional-latam-v2';
+/** Fixed to the original 7-category catalog so the deterministic demo dataset (and its documented
+ * natural-query scenarios) stays stable as the full modality catalog grows. */
+const demoModalities = ['Resonancia magnética', 'Tomografía computarizada', 'Ultrasonido', 'Monitoreo de pacientes', 'Rayos X', 'Sistema intervencionista', 'Otro'];
 const hospitals = [
   ['Red Istmo Ficticia', 'Hospital Brisa Ficticio', 'Panamá', 'Ciudad de Panamá'],
   ['Red Istmo Ficticia', 'Hospital Canal Ficticio', 'Panamá', 'Ciudad de Panamá'],
@@ -33,7 +37,7 @@ function seedRows() {
       const [person, role] = people[(hospitalIndex + equipmentIndex) % people.length];
       return {
         id: uuid('2', number), hospitalId, client, hospital: name, country, city,
-        modality: modalities[(hospitalIndex + equipmentIndex) % modalities.length],
+        modality: demoModalities[(hospitalIndex + equipmentIndex) % demoModalities.length],
         manufacturer: `Fabricante Ficticio ${(equipmentIndex % 3) + 1}`,
         model: `Modelo Ficticio ${String.fromCharCode(65 + (hospitalIndex + equipmentIndex) % 8)}`,
         serial: `FIC-${String(number).padStart(3, '0')}`,
@@ -59,7 +63,7 @@ function ageBand(age) { return age === null || age === undefined ? 'Desconocida'
 /** @param {number} score */
 function confidenceBand(score) { return score >= 80 ? 'Alta (80–100)' : score >= 50 ? 'Media (50–79)' : 'Baja (0–49)'; }
 /** @param {any} record @param {Date} now */
-function stale(record, now) { return now.getTime() - new Date(record.capturedAt).getTime() > 365 * 24 * 60 * 60 * 1000; }
+function stale(record, now) { return isStale(record.capturedAt, now); }
 
 /** @param {any} record @param {Date} now */
 function assessmentFor(record, now) {
@@ -75,6 +79,7 @@ export function regionalPanorama(db, now = () => new Date()) {
   db.exec(`CREATE TABLE IF NOT EXISTS regional_demo_equipment (
     id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, data TEXT NOT NULL
   )`);
+  const opportunity = opportunities(db, now);
   const insert = db.prepare('INSERT INTO regional_demo_equipment VALUES (?, ?, ?)');
   function reset() {
     db.exec('BEGIN');
@@ -167,7 +172,11 @@ export function regionalPanorama(db, now = () => new Date()) {
       evidenceIds: [], assessment: record.assessment,
     }));
     const items = records.map(record => ({ id: record.id, hospitalId: id, kind: 'individual', quantity: 1, modality: record.modality, manufacturer: record.manufacturer, model: record.model, serial: record.serial, age: record.age, sourceObservationIds: [record.id], sourceProfileIds: [record.profile.id], evidenceIds: [], splitHistory: [], fieldStates: Object.fromEntries(Object.entries(record.assessment.equipment[0]).map(([key, field]) => [key, field.state])), confirmations: {}, fieldSources: {} }));
-    return { id, name: first.hospital, client: first.client, country: first.country, city: first.city, fictional: true, dataset: dataset(), installedBase: { total: 6, items, duplicateCandidates: [], conflicts: [], conflictHistory: [], changeHistory: [] }, observations };
+    const opportunityList = records.map(record => opportunity.signal({
+      itemId: record.id, hospitalId: id, modality: record.modality, manufacturer: record.manufacturer, model: record.model, serial: record.serial,
+      age: record.age, confidence: record.assessment.confidence.score, capturedAt: record.capturedAt, hasIdentityConflict: false, supportingObservationIds: [record.id],
+    }));
+    return { id, name: first.hospital, client: first.client, country: first.country, city: first.city, fictional: true, dataset: dataset(), installedBase: { total: 6, items, duplicateCandidates: [], conflicts: [], conflictHistory: [], changeHistory: [], opportunities: opportunityList }, observations };
   }
   /** @param {string} method @param {string} path */
   async function handle(method, path) {

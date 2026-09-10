@@ -58,7 +58,8 @@ function ground(question, filters) {
   /** @type {Record<string, RegExp>} */
   const countryPatterns = { 'Panamá': /\bpanama/, Brasil: /\bbrasil|\bbrazil|brasilen|brasileir|brazilian/, Colombia: /\bcolombia|colombian/ };
   /** @type {Record<string, RegExp>} */
-  const modalityPatterns = { 'Resonancia magnética': /resonancia|resonador|magnetic resonance|\bmri?\b/, 'Tomografía computarizada': /tomograf|computed tomography|\bct\b/, Ultrasonido: /ultrason|ultrasound/, 'Monitoreo de pacientes': /monitor/, 'Rayos X': /rayos|x.?ray/, 'Sistema intervencionista': /interven/, Otro: /\botro\b|\bother\b/ };
+  const modalityPatterns = { 'Resonancia magnética': /resonancia|resonador|magnetic resonance|\bmri?\b/, 'Tomografía computarizada': /tomograf|computed tomography|\bct\b/, Ultrasonido: /ultrason|ultrasound/, 'Monitoreo de pacientes': /monitor/, 'Rayos X': /rayos|x.?ray/, 'Sistema intervencionista': /interven/,
+    'Mamografía': /mamograf|mammogra/, 'Medicina nuclear / PET': /medicina nuclear|nuclear medicine|\bpet\b/, 'Electrocardiografía': /electrocardiograf|\becg\b|\bekg\b/, 'Ventilación mecánica': /ventilad|ventilator/, 'Desfibrilador': /desfibrilad|defibrillat/, 'Endoscopia': /endoscop/, Otro: /\botro\b|\bother\b/ };
   const statePatterns = { Confirmado: /confirmad|confirmed/, Reportado: /reportad|reported/, Estimado: /estimad|estimated/, Desconocido: /desconoc|unknown/ };
   const confidencePatterns = { Alta: /confianza alta|high confidence/, Media: /confianza media|medium confidence/, Baja: /confianza baja|low confidence/ };
   const freshnessPatterns = { Vigente: /vigent|recient|fresh|current/, Desactualizada: /desactual|stale|outdated/ };

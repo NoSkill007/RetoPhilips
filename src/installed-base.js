@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { RequestError } from './request-error.js';
 import { normalize } from './observation-schema.js';
+import { assessObservation } from './confidence.js';
 
 /** @param {import('node:sqlite').DatabaseSync} db @param {() => Date} now */
 export function installedBase(db, now) {
@@ -353,6 +354,18 @@ export function installedBase(db, now) {
     return resolved;
   }
 
+  /** Assess an item's own confidence for a given supporting-observation date, reusing the observation confidence model.
+   * @param {any} item @param {string | null} capturedAt */
+  function assessItem(item, capturedAt) {
+    const hospitalRow = db.prepare('SELECT name, client FROM hospitals WHERE id = ?').get(item.hospitalId);
+    const confirmedFields = Object.entries(item.fieldStates ?? {}).filter(([, state]) => state === 'Confirmado').map(([field]) => `equipment.0.${field}`);
+    return assessObservation({
+      originalText: '', reviewed: { client: hospitalRow?.client ?? null, hospital: hospitalRow?.name ?? null, area: null,
+        equipment: [{ modality: item.modality, quantity: item.quantity, manufacturer: item.manufacturer, model: item.model, serial: item.serial, age: item.age }] },
+      extracted: null, capturedAt: capturedAt ?? new Date(0).toISOString(), confirmedFields,
+    }, now());
+  }
+
   for (const row of db.prepare('SELECT data FROM observations ORDER BY rowid').all()) projectObservation(JSON.parse(String(row.data)));
-  return { projectObservation, splitFromObservation, decideDuplicate, correct, resolveConflict, confirmedFieldsForObservation, present };
+  return { projectObservation, splitFromObservation, decideDuplicate, correct, resolveConflict, confirmedFieldsForObservation, present, assessItem };
 }

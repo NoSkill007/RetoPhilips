@@ -23,7 +23,7 @@ function node(tag, text) { const result = document.createElement(tag); result.te
 let draft = null;
 /** @type {any[]} */
 let hospitals = [];
-const modalities = ['Resonancia magnética', 'Tomografía computarizada', 'Ultrasonido', 'Monitoreo de pacientes', 'Rayos X', 'Sistema intervencionista', 'Otro'];
+const modalities = ['Resonancia magnética', 'Tomografía computarizada', 'Ultrasonido', 'Monitoreo de pacientes', 'Rayos X', 'Sistema intervencionista', 'Mamografía', 'Medicina nuclear / PET', 'Electrocardiografía', 'Ventilación mecánica', 'Desfibrilador', 'Endoscopia', 'Otro'];
 const equipmentFields = [ ['modality', 'Modalidad'], ['quantity', 'Cantidad'], ['manufacturer', 'Fabricante'], ['model', 'Modelo'], ['serial', 'Número de serie'], ['age', 'Antigüedad reportada (años)'] ];
 
 async function loadProfiles() {
@@ -121,9 +121,6 @@ function renderFollowUp() {
     submit.addEventListener('click', () => { if (!answer.value.trim()) feedback('Escribe una respuesta o selecciona “No lo sé”.', true); else answerFollowUp(answer.value); });
     const unknown = document.createElement('button'); unknown.type = 'button'; unknown.textContent = 'No lo sé'; unknown.addEventListener('click', () => answerFollowUp(null));
     actions.append(submit, unknown); panel.append(actions);
-  }
-  for (const control of form('review-form').elements) {
-    if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLButtonElement) control.disabled = Boolean(question);
   }
 }
 function renderReview() {
@@ -248,6 +245,40 @@ async function resolveConflict(hospitalId, conflictId, serializedValue, explanat
     await showHospital(hospitalId); window.dispatchEvent(new CustomEvent('sitesignal:panorama-refresh')); feedback('Conflicto resuelto con explicación y registro de cambios.');
   } catch (error) { report(error); }
 }
+/** @param {string} hospitalId @param {string} itemId @param {'reviewed' | 'dismissed'} decision @param {string} note */
+async function reviewOpportunity(hospitalId, itemId, decision, note) {
+  try {
+    await api(`/api/opportunities/${itemId}/review`, { decision, note });
+    await showHospital(hospitalId);
+    feedback(decision === 'reviewed' ? 'Oportunidad marcada como revisada.' : 'Oportunidad descartada con nota explicativa.');
+  } catch (error) { report(error); }
+}
+/** @param {any} signal @param {boolean} actionable */
+function opportunityCard(signal, actionable) {
+  const card = document.createElement('article'); card.className = `opportunity-signal ${signal.current ? 'current' : 'not-current'}`;
+  card.append(node('p', signal.current ? 'OPORTUNIDAD POTENCIAL VIGENTE' : 'SEÑAL EVALUADA · AÚN NO VIGENTE'));
+  card.append(node('h4', `${signal.modality ?? 'Modalidad desconocida'} · ${signal.serial ?? 'Sin número de serie'}`));
+  card.append(node('p', `Confianza: ${signal.confidence} · Antigüedad: ${signal.age ?? 'Desconocida'} años${signal.stale ? ' · Información desactualizada' : ''}`));
+  const conditions = document.createElement('ul'); conditions.className = 'opportunity-conditions';
+  for (const condition of signal.conditions) conditions.append(node('li', `${condition.met ? '✓' : '✗'} ${condition.label} — ${condition.detail}`));
+  card.append(conditions);
+  card.append(node('p', `Observaciones que la respaldan: ${signal.supportingObservationIds.map(/** @param {string} value */ value => value.slice(0, 8)).join(', ') || 'ninguna'}`));
+  if (signal.review) {
+    const history = document.createElement('details'); history.append(node('summary', `Revisión: ${signal.review.current.decision === 'reviewed' ? 'Revisada' : 'Descartada'} por ${signal.review.current.author.name}`));
+    for (const entry of signal.review.history) history.append(node('p', `${new Date(entry.at).toLocaleString('es')} · ${entry.author.name} · ${entry.decision === 'reviewed' ? 'Revisada' : 'Descartada'} · ${entry.note}`));
+    card.append(history);
+  }
+  if (actionable) {
+    const note = document.createElement('textarea'); note.placeholder = 'Nota de la revisión'; note.maxLength = 500; note.rows = 2;
+    const actions = document.createElement('div'); actions.className = 'candidate-actions';
+    const dismiss = document.createElement('button'); dismiss.type = 'button'; dismiss.textContent = 'Descartar';
+    dismiss.addEventListener('click', () => { if (!note.value.trim()) feedback('Escribe una nota que explique la decisión.', true); else reviewOpportunity(signal.hospitalId, signal.itemId, 'dismissed', note.value); });
+    const review = document.createElement('button'); review.type = 'button'; review.className = 'primary'; review.textContent = 'Marcar revisada';
+    review.addEventListener('click', () => { if (!note.value.trim()) feedback('Escribe una nota que explique la decisión.', true); else reviewOpportunity(signal.hospitalId, signal.itemId, 'reviewed', note.value); });
+    actions.append(dismiss, review); card.append(note, actions);
+  }
+  return card;
+}
 /** @param {string} id */
 async function showHospital(id) {
   const hospital = await api('/api/hospitals/' + id); const target = el('hospital-view'); target.replaceChildren();
@@ -315,6 +346,20 @@ async function showHospital(id) {
       const separate = document.createElement('button'); separate.textContent = 'Conservar separados'; separate.addEventListener('click', () => decideDuplicate(id, candidate.id, 'keep-separate'));
       const consolidate = document.createElement('button'); consolidate.className = 'primary'; consolidate.textContent = 'Consolidar'; consolidate.addEventListener('click', () => decideDuplicate(id, candidate.id, 'consolidate'));
       actions.append(separate, consolidate); review.append(actions); target.append(review);
+    }
+  }
+  if (hospital.installedBase.opportunities.length) {
+    target.append(node('h3', 'Oportunidades potenciales de renovación'));
+    target.append(node('p', 'Señal explicable, no una recomendación definitiva: revisa las condiciones antes de actuar.'));
+    const current = hospital.installedBase.opportunities.filter(/** @param {any} signal */ signal => signal.current);
+    const other = hospital.installedBase.opportunities.filter(/** @param {any} signal */ signal => !signal.current);
+    if (!current.length) target.append(node('p', 'Ningún equipo cumple hoy todas las condiciones de una oportunidad vigente.'));
+    for (const signal of current) target.append(opportunityCard(signal, !hospital.fictional));
+    if (other.length) {
+      const evaluated = document.createElement('details'); evaluated.className = 'audit-history';
+      evaluated.append(node('summary', `Otras señales evaluadas (${other.length})`));
+      for (const signal of other) evaluated.append(opportunityCard(signal, !hospital.fictional));
+      target.append(evaluated);
     }
   }
   if (hospital.installedBase.changeHistory.length || hospital.installedBase.conflictHistory.some(/** @param {any} conflict */ conflict => conflict.status === 'resolved')) {
