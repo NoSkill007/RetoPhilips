@@ -25,6 +25,10 @@ SQLite se crea en `data/sitesignal.db`, relativo al repositorio, y conserva el i
 
 Cada extracción se valida contra un schema estricto, el catálogo de modalidades y la cláusula del relato asociada a cada equipo. Los valores sin respaldo se rechazan. Si la primera salida de QVAC es inválida, SiteSignal hace un único reintento con instrucciones correctivas. Tras un segundo fallo abre tarjetas vacías para captura manual, conserva el relato original y registra procedencia `Manual`.
 
+SiteSignal formula hasta tres preguntas, una por vez, en este orden: hospital, modalidad, cantidad, fabricante, modelo y antigüedad. Cada una permite responder “No lo sé”. Los campos se muestran como Confirmado, Reportado, Estimado o Desconocido; el estado general toma el más débil entre hospital, modalidad y cantidad.
+
+La confianza suma hasta 40 puntos de completitud (hospital 8; por equipo: modalidad 8, cantidad 8, fabricante 5, modelo 5 y antigüedad 6), 25 de vigencia que disminuyen linealmente hasta cero al cumplir doce meses y 35 según la proporción de esos campos respaldada por evidencia o confirmación independiente. Las bandas son Baja 0–49, Media 50–79 y Alta 80–100. El número de serie y el área conservan su estado, pero no reducen el puntaje porque pueden no aplicar.
+
 Variables opcionales: `SITESIGNAL_PORT` (1–65535), `SITESIGNAL_DATA` (directorio de almacenamiento). `SITESIGNAL_MODEL` debe configurarse en cada terminal nueva o persistirse mediante la configuración de entorno de Windows. Un modelo ausente permite abrir la interfaz con instrucciones de recuperación; un puerto ocupado o almacenamiento sin permisos impide arrancar y produce un mensaje en terminal. No se modifica ni elimina la base existente.
 
 ## Validación

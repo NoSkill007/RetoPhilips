@@ -70,6 +70,62 @@ function addCard(equipment) {
   remove.addEventListener('click', () => card.remove()); card.append(remove);
   el('equipment-cards').append(card);
 }
+/** @param {HTMLElement} target @param {any} assessment */
+function renderAssessment(target, assessment) {
+  target.replaceChildren();
+  const summary = document.createElement('div'); summary.className = `confidence ${assessment.confidence.band.toLowerCase()}`;
+  summary.append(node('span', String(assessment.confidence.score)), node('strong', `Confianza ${assessment.confidence.band.toLowerCase()}`));
+  target.append(summary, node('p', `Estado general: ${assessment.overallState}`));
+  const components = document.createElement('ul'); components.className = 'components';
+  /** @type {Record<string, string>} */
+  const names = { completeness: 'Completitud', freshness: 'Vigencia', evidence: 'Evidencia o confirmación' };
+  for (const key of ['completeness', 'freshness', 'evidence']) {
+    const component = assessment.confidence.components[key]; components.append(node('li', `${names[key]}: ${component.score} de ${component.max}`));
+  }
+  target.append(components, node('h3', 'Estado de cada campo'));
+  const states = document.createElement('dl'); states.className = 'field-states';
+  for (const [key, label] of [['client', 'Cliente'], ['hospital', 'Hospital'], ['area', 'Área']]) states.append(node('dt', label), node('dd', assessment.fields[key].state));
+  assessment.equipment.forEach(/** @param {any} equipment @param {number} index */ (equipment, index) => {
+    for (const [key, label] of equipmentFields) states.append(node('dt', `${label} · equipo ${index + 1}`), node('dd', equipment[key].state));
+  });
+  target.append(states);
+}
+/** @param {string | number | null} answer */
+async function answerFollowUp(answer) {
+  if (!draft?.followUp) return;
+  try {
+    draft = await api(`/api/drafts/${draft.id}/follow-up`, { answer });
+    renderReview(); feedback(draft.followUp ? 'Respuesta guardada. Hay otra pregunta útil.' : 'Preguntas completadas. Revisa las tarjetas antes de guardar.');
+  } catch (error) { report(error); }
+}
+function renderFollowUp() {
+  const panel = el('followup-panel'); panel.replaceChildren();
+  const question = draft.followUp;
+  if (!question) { panel.hidden = true; }
+  else {
+    panel.hidden = false;
+    panel.append(node('p', `Pregunta ${draft.followUpProgress.answered + 1} de ${draft.followUpProgress.limit}`), node('h3', question.prompt));
+    let answer;
+    if (question.kind === 'modality') {
+      answer = document.createElement('select'); option(answer, '', 'Selecciona una modalidad');
+      for (const value of modalities) option(answer, value, value);
+    } else {
+      answer = document.createElement('input'); answer.type = question.kind === 'number' ? 'number' : 'text';
+      answer.placeholder = question.kind === 'number' ? 'Escribe un número' : 'Escribe tu respuesta';
+      if (question.field === 'quantity') { answer.min = '1'; answer.max = '10000'; answer.step = '1'; }
+      if (question.field === 'age') { answer.min = '0'; answer.max = '150'; answer.step = '0.1'; }
+    }
+    answer.setAttribute('aria-label', question.prompt); panel.append(answer);
+    const actions = document.createElement('div'); actions.className = 'followup-actions';
+    const submit = document.createElement('button'); submit.type = 'button'; submit.textContent = 'Guardar respuesta';
+    submit.addEventListener('click', () => { if (!answer.value.trim()) feedback('Escribe una respuesta o selecciona “No lo sé”.', true); else answerFollowUp(answer.value); });
+    const unknown = document.createElement('button'); unknown.type = 'button'; unknown.textContent = 'No lo sé'; unknown.addEventListener('click', () => answerFollowUp(null));
+    actions.append(submit, unknown); panel.append(actions);
+  }
+  for (const control of form('review-form').elements) {
+    if (control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLButtonElement) control.disabled = Boolean(question);
+  }
+}
 function renderReview() {
   el('draft-author').textContent = `Observación de ${draft.profile.name} · ${draft.profile.role}`;
   el('location-fields').replaceChildren(); el('equipment-cards').replaceChildren();
@@ -90,7 +146,9 @@ function renderReview() {
     for (const issue of draft.provenance.validationIssues) list.append(node('li', issue));
     notice.append(list);
   }
+  renderAssessment(el('draft-assessment'), draft.assessment);
   el('inference-info').textContent = draft.provenance.kind === 'manual' ? 'Procedencia: captura manual · La IA no produjo el resultado guardado.' : `${draft.provenance.metadata.engine} · ${draft.provenance.metadata.model} · ${(draft.provenance.metadata.durationMs / 1000).toFixed(1)} s de inferencia · ${draft.provenance.attempts} intento${draft.provenance.attempts === 1 ? '' : 's'}`;
+  renderFollowUp();
   el('review').hidden = false; el('review').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 select('hospital-choice').addEventListener('change', () => {
@@ -154,14 +212,16 @@ async function loadHospitals() {
 async function showHospital(id) {
   const hospital = await api('/api/hospitals/' + id); const target = el('hospital-view'); target.replaceChildren();
   target.append(node('h2', `Perfil 360 · ${hospital.name}`), node('p', `Cliente: ${hospital.client ?? 'Desconocido'}`));
-  target.append(node('p', 'Observaciones reportadas. La consolidación de equipos y evaluación de confianza se incorporarán en próximas entregas.'));
+  target.append(node('p', 'Observaciones reportadas con estados y confianza explicable. La consolidación de equipos se incorporará en próximas entregas.'));
   for (const observation of hospital.observations) {
     const article = document.createElement('article');
     article.append(node('h3', `${observation.profile.name} · ${observation.profile.role}`), node('p', new Date(observation.createdAt).toLocaleString('es')));
-    article.append(node('p', `Área: ${observation.reviewed.area ?? 'Desconocido'}`));
-    for (const item of observation.reviewed.equipment) {
+    article.append(node('p', `Área: ${observation.reviewed.area ?? 'Desconocido'} · ${observation.assessment.fields.area.state}`));
+    const assessment = document.createElement('div'); assessment.className = 'assessment';
+    renderAssessment(assessment, observation.assessment); article.append(assessment);
+    for (const [index, item] of observation.reviewed.equipment.entries()) {
       const list = document.createElement('dl'); list.className = 'equipment-summary';
-      for (const [key, label] of equipmentFields) list.append(node('dt', label), node('dd', item[key] === null ? 'Desconocido' : String(item[key])));
+      for (const [key, label] of equipmentFields) list.append(node('dt', label), node('dd', `${item[key] === null ? 'Desconocido' : String(item[key])} · ${observation.assessment.equipment[index][key].state}`));
       article.append(list);
     }
     const details = document.createElement('details'); details.append(node('summary', 'Texto original y procedencia'));

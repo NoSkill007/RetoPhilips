@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { profileSchema, activeSchema, captureSchema, saveSchema, inferenceSchema, validateExtraction, normalize } from './observation-schema.js';
+import { profileSchema, activeSchema, captureSchema, saveSchema, inferenceSchema, validateExtraction, normalize, modalities } from './observation-schema.js';
+import { assessObservation, confidencePolicy, nextFollowUp } from './confidence.js';
+
+const followUpAnswerSchema = z.object({ answer: z.union([z.string().trim().min(1).max(300), z.number(), z.null()]) }).strict();
 
 export class RequestError extends Error {
   /** @param {number} status @param {string} message */
   constructor(status, message) { super(message); this.status = status; }
 }
 
-/** @param {import('node:sqlite').DatabaseSync} db @param {import('./observation-schema.js').TextExtractor} extractText */
-export function observationApi(db, extractText) {
+/** @param {import('node:sqlite').DatabaseSync} db @param {import('./observation-schema.js').TextExtractor} extractText @param {() => Date} now @param {(record: any) => string[]} confirmationResolver */
+export function observationApi(db, extractText, now = () => new Date(), confirmationResolver = () => []) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -21,6 +24,23 @@ export function observationApi(db, extractText) {
     const row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(id);
     if (!row) throw new RequestError(404, 'El perfil no existe. Selecciona un perfil de colaborador.');
     return row;
+  }
+  /** @param {any} draft */
+  function presentDraft(draft) {
+    const hospitals = db.prepare('SELECT * FROM hospitals ORDER BY name').all();
+    const needle = normalize(draft.reviewed.hospital ?? '');
+    const candidates = hospitals.filter(h => needle && (normalize(String(h.name)).includes(needle) || needle.includes(normalize(String(h.name)))));
+    const followUp = nextFollowUp(draft);
+    return { ...draft, candidates, followUp, followUpProgress: { answered: draft.followUpHistory.length, limit: 3 },
+      assessment: assessObservation({ ...draft, confirmedFields: confirmationResolver(draft) }, now()) };
+  }
+  /** @param {any} observation */
+  function presentObservation(observation) {
+    const provenance = observation.provenance ?? (observation.inference
+      ? { kind: 'qvac', metadata: observation.inference, attempts: 1, retryCorrected: false, validationIssues: [] }
+      : { kind: 'manual', attempts: 2, validationIssues: [] });
+    const current = { ...observation, provenance };
+    return { ...current, assessment: assessObservation({ ...current, confirmedFields: confirmationResolver(current) }, now()) };
   }
   /** @param {string} method @param {string} path @param {unknown} body */
   return async function handle(method, path, body) {
@@ -40,9 +60,10 @@ export function observationApi(db, extractText) {
       db.prepare("INSERT INTO preferences VALUES ('activeProfile', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(profileId);
       return { activeProfileId: profileId };
     }
+    if (path === '/api/confidence-policy' && method === 'GET') return confidencePolicy;
     if (path === '/api/drafts' && method === 'POST') {
       const { text } = captureSchema.parse(body);
-      const capturedAt = new Date().toISOString();
+      const capturedAt = now().toISOString();
       const active = db.prepare("SELECT value FROM preferences WHERE key = 'activeProfile'").get();
       if (!active) throw new RequestError(409, 'Crea y selecciona un perfil de colaborador antes de capturar.');
       const collaborator = profile(String(active.value));
@@ -74,19 +95,47 @@ export function observationApi(db, extractText) {
         ? { kind: 'qvac', metadata: validResult.inference, attempts, retryCorrected: attempts === 2, validationIssues: issues }
         : { kind: 'manual', attempts: 2, validationIssues: issues };
       const draft = { id: randomUUID(), originalText: text, reviewed,
-        extracted: validResult?.extraction.fields ?? null, profile: collaborator, provenance, capturedAt };
+        extracted: validResult?.extraction.fields ?? null, profile: collaborator, provenance, capturedAt, followUpHistory: [] };
       db.prepare('INSERT INTO drafts VALUES (?, ?)').run(draft.id, JSON.stringify(draft));
-      const hospitals = db.prepare('SELECT * FROM hospitals ORDER BY name').all();
-      const needle = normalize(reviewed.hospital ?? '');
-      const candidates = hospitals.filter(h => needle && (normalize(String(h.name)).includes(needle) || needle.includes(normalize(String(h.name)))));
-      return { ...draft, candidates };
+      return presentDraft(draft);
+    }
+    const followUpMatch = path.match(/^\/api\/drafts\/([0-9a-f-]+)\/follow-up$/);
+    if (followUpMatch && method === 'POST') {
+      const draftId = z.uuid().parse(followUpMatch[1]);
+      const row = db.prepare('SELECT data FROM drafts WHERE id = ?').get(draftId);
+      if (!row) throw new RequestError(404, 'El borrador no existe.');
+      const draft = JSON.parse(String(row.data));
+      const question = nextFollowUp(draft);
+      if (!question) throw new RequestError(409, 'No hay otra pregunta de seguimiento.');
+      const { answer } = followUpAnswerSchema.parse(body);
+      if (answer !== null) {
+        if (question.field === 'hospital') {
+          if (typeof answer !== 'string') throw new RequestError(400, 'El hospital debe ser texto.');
+          draft.reviewed.hospital = answer;
+        } else {
+          const equipmentIndex = question.equipmentIndex;
+          if (typeof equipmentIndex !== 'number') throw new RequestError(400, 'La pregunta no identifica un equipo.');
+          const equipment = draft.reviewed.equipment[equipmentIndex];
+          if (!equipment) throw new RequestError(400, 'El equipo de la pregunta ya no existe.');
+          if (question.field === 'modality') equipment.modality = z.enum(modalities).parse(answer);
+          else if (question.field === 'quantity') equipment.quantity = z.coerce.number().int().min(1).max(10000).parse(answer);
+          else if (question.field === 'age') equipment.age = z.coerce.number().min(0).max(150).parse(answer);
+          else {
+            if (typeof answer !== 'string') throw new RequestError(400, 'La respuesta debe ser texto.');
+            equipment[question.field] = answer;
+          }
+        }
+      }
+      draft.followUpHistory.push({ key: question.key, answered: answer !== null, at: now().toISOString() });
+      db.prepare('UPDATE drafts SET data = ? WHERE id = ?').run(JSON.stringify(draft), draft.id);
+      return presentDraft(draft);
     }
     if (path === '/api/hospitals' && method === 'GET') return db.prepare('SELECT * FROM hospitals ORDER BY name').all();
     if (path.startsWith('/api/hospitals/') && method === 'GET') {
       const id = z.uuid().parse(path.slice('/api/hospitals/'.length));
       const hospital = db.prepare('SELECT * FROM hospitals WHERE id = ?').get(id);
       if (!hospital) throw new RequestError(404, 'El hospital no existe.');
-      return { ...hospital, observations: db.prepare('SELECT data FROM observations WHERE hospital_id = ? ORDER BY rowid DESC').all(id).map(row => JSON.parse(String(row.data))) };
+      return { ...hospital, observations: db.prepare('SELECT data FROM observations WHERE hospital_id = ? ORDER BY rowid DESC').all(id).map(row => presentObservation(JSON.parse(String(row.data)))) };
     }
     if (path === '/api/observations' && method === 'POST') {
       const input = saveSchema.parse(body);
@@ -107,10 +156,10 @@ export function observationApi(db, extractText) {
         const observation = { id: randomUUID(), hospitalId: hospital.id, originalText: draft.originalText,
           reviewed: { ...input.reviewed, hospital: hospital.name, client: hospital.client }, extracted: draft.extracted,
           profile: draft.profile, provenance: draft.provenance,
-          capturedAt: draft.capturedAt, createdAt: new Date().toISOString() };
+          capturedAt: draft.capturedAt, createdAt: now().toISOString() };
         db.prepare('INSERT INTO observations VALUES (?, ?, ?, ?)').run(observation.id, input.draftId, observation.hospitalId, JSON.stringify(observation));
         db.exec('COMMIT');
-        return observation;
+        return presentObservation(observation);
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     }
     throw new RequestError(404, 'Ruta no disponible.');

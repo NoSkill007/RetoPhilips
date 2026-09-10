@@ -6,8 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { observationApi, RequestError } from './observations.js';
 
-/** @param {{ dataDirectory: string, port: number, probeQvac: () => Promise<{state: string, message: string}>, qvacStatus?: () => {state: string, message: string}, extractText?: import('./observation-schema.js').TextExtractor }} options */
-export async function startApplication({ dataDirectory, port, probeQvac, qvacStatus, extractText = async () => { throw new Error('QVAC no configurado'); } }) {
+/** @param {{ dataDirectory: string, port: number, probeQvac: () => Promise<{state: string, message: string}>, qvacStatus?: () => {state: string, message: string}, extractText?: import('./observation-schema.js').TextExtractor, now?: () => Date, confirmationResolver?: (record: any) => string[] }} options */
+export async function startApplication({ dataDirectory, port, probeQvac, qvacStatus, extractText = async () => { throw new Error('QVAC no configurado'); }, now = () => new Date(), confirmationResolver = () => [] }) {
   await mkdir(dataDirectory, { recursive: true });
   const db = new DatabaseSync(join(dataDirectory, 'sitesignal.db'));
   try {
@@ -16,7 +16,7 @@ export async function startApplication({ dataDirectory, port, probeQvac, qvacSta
     db.exec('UPDATE installation SET starts = starts + 1');
   } catch (error) { db.close(); throw error; }
   const installation = db.prepare('SELECT id, starts FROM installation').get();
-  const handleObservation = observationApi(db, extractText);
+  const handleObservation = observationApi(db, extractText, now, confirmationResolver);
   let qvac = { state: 'degraded', message: 'Comprobando el modelo local…' };
   const probe = Promise.resolve().then(probeQvac).then(result => { qvac = result; }).catch(() => {
     qvac = { state: 'unavailable', message: 'No se pudo comprobar QVAC. Revisa la preparación y reinicia.' };
