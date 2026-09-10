@@ -18,7 +18,7 @@ Las decisiones principales ya confirmadas son:
 
 ## Estado implementado
 
-Los tickets del arranque local al panorama regional están terminados:
+Los tickets del arranque local a las consultas naturales están terminados:
 
 | Ticket | Resultado | Commit principal |
 |---|---|---|
@@ -30,8 +30,11 @@ Los tickets del arranque local al panorama regional están terminados:
 | #7 | Candidatos a duplicado y consolidación humana | `e491916` |
 | #8 | Conflictos, correcciones e historial auditable | `3a07139`, `a3121dc` |
 | #9 | Panorama regional offline | `4925691` |
+| #10 | Consultas naturales seguras y filtros visibles | `aaedf66` |
 
 El panorama incluye un dataset reiniciable de 10 hospitales y 60 equipos ficticios en Panamá, Brasil y Colombia. Sus filtros, mapa SVG local, métricas y agregaciones también incorporan las capturas locales sin permitir que “Restablecer demo” las borre. Los perfiles 360 ficticios son navegables desde la lista regional.
+
+El ticket #10 permite escribir preguntas en español o inglés y convertirlas mediante QVAC en filtros visibles y editables de país, ciudad, cliente, hospital, modalidad, antigüedad, estado, confianza y vigencia. La API valida un contrato estricto, vuelve a comprobar que cada filtro aparezca en la pregunta y consulta únicamente el panorama local; nunca acepta SQL generado. Las intenciones ambiguas o no compatibles no aplican filtros. La consulta real `Show Brazilian customers with MR systems older than seven years` produjo los filtros de Brasil y resonancia magnética; el límite estricto “más de 7” se normaliza de forma determinista como antigüedad mínima de 8 años.
 
 El commit `07393d4` corrige un fallo observado con QVAC real: el modelo devolvía ausencias como `"null"`/`"no specified"` y mezclaba afirmaciones válidas con otras sin respaldo. SiteSignal ahora normaliza esos marcadores, reintenta con errores concretos y conserva una extracción parcial solo cuando queda al menos un hospital y una modalidad respaldada. Los valores dudosos permanecen vacíos y visibles para revisión. La captura manual sigue siendo el último recurso cuando no queda una extracción útil.
 
@@ -43,14 +46,13 @@ Con QVAC real, el resultado seguro conserva `DemoCare Pacific` y `Tomografía co
 
 ## Próximo trabajo
 
-El siguiente ticket es **#10, consultas naturales**, definido en `.scratch/sitesignal/issues/09-natural-queries.md`. Debe interpretar preguntas en español o inglés como filtros visibles y editables del panorama, sin ejecutar SQL generado por el modelo. Empieza con una prueba de API y un adaptador determinista; deja la comprobación con QVAC real como integración aislada.
+El siguiente ticket es **#11, oportunidades potenciales explicables**, definido en `.scratch/sitesignal/issues/10-opportunities.md`.
 
 Después siguen, en orden:
 
-1. `10-opportunities.md` → ticket #11, oportunidades potenciales explicables.
-2. `11-voice-capture.md` → ticket #12, dictado y transcripción local.
-3. `12-photo-evidence.md` → ticket #13, evidencia ficticia por fotografía.
-4. `13-offline-delivery.md` → ticket #14, exportaciones y entrega offline.
+1. `11-voice-capture.md` → ticket #12, dictado y transcripción local.
+2. `12-photo-evidence.md` → ticket #13, evidencia ficticia por fotografía.
+3. `13-offline-delivery.md` → ticket #14, exportaciones y entrega offline.
 
 Para cada ticket: implementa el comportamiento completo, ejecuta `npm run typecheck`, `npm test` y `git diff --check`, revisa especificación y estándares, crea un commit local y reinicia la aplicación con QVAC para la prueba visual.
 
@@ -75,10 +77,10 @@ La aplicación escucha en `http://127.0.0.1:3210`. Si el puerto está ocupado, c
 
 Estado verificado al escribir este documento:
 
-- `npm test`: 31/31 pruebas aprobadas.
+- `npm test`: 39/39 pruebas aprobadas.
 - `npm run typecheck`: aprobado.
 - `git diff --check`: aprobado.
-- Rama `main`: al terminar este cambio quedará dos commits por delante de `origin/main`: el arreglo `07393d4` y este documento de continuidad. Verifica con `git status -sb` antes de sincronizar.
+- Rama `main`: verifica con `git status -sb` antes de sincronizar; no se hace `push` automáticamente.
 - La aplicación quedó ejecutándose con QVAC cargado en el puerto 3210, pero un nuevo chat debe comprobar el proceso porque la sesión de terminal puede no persistir.
 - GitHub CLI fue instalado e inició sesión en otra terminal, aunque esta terminal no lo encuentra actualmente en `PATH`. Abrir una terminal nueva puede ser necesario.
 

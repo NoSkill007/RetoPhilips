@@ -37,6 +37,8 @@ Las observaciones incompatibles sobre un equipo con la misma serie permanecen vi
 
 El panorama regional precarga un dataset determinista de diez hospitales y sesenta equipos ficticios en Panamá, Brasil y Colombia. Resume hospitales, equipos, confianza, información desactualizada y oportunidades potenciales; permite filtrar por cliente, hospital, país, ciudad y modalidad. El mapa vectorial, los gráficos y los demás recursos son locales. Las capturas guardadas se incorporan al panorama y se distinguen del dataset precargado; restablecer la demostración no elimina esas capturas.
 
+También puedes preguntar al panorama en español o inglés. QVAC interpreta únicamente filtros visibles de ubicación, cliente, hospital, modalidad, antigüedad aproximada, estado, confianza y vigencia; el usuario puede editarlos o quitarlos antes de continuar. SiteSignal valida esos valores contra el catálogo local y contra las palabras de la pregunta, muestra la procedencia y explica el resultado. Las solicitudes ambiguas o no compatibles no aplican filtros, y el modelo nunca genera ni ejecuta SQL.
+
 Variables opcionales: `SITESIGNAL_PORT` (1–65535), `SITESIGNAL_DATA` (directorio de almacenamiento). `SITESIGNAL_MODEL` debe configurarse en cada terminal nueva o persistirse mediante la configuración de entorno de Windows. Un modelo ausente permite abrir la interfaz con instrucciones de recuperación; un puerto ocupado o almacenamiento sin permisos impide arrancar y produce un mensaje en terminal. No se modifica ni elimina la base existente.
 
 ## Validación
