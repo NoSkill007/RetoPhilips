@@ -27,12 +27,12 @@ async function start(directory) {
     const profile = await api('/api/profiles', { name, role: name === 'Ana Demo' ? 'Ingeniero de servicio' : 'Vendedor' });
     await api('/api/profiles/active', { profileId: profile.id }); return profile;
   }
-  /** @param {string | null} hospitalId @param {string} model @param {string} manufacturer */
+  /** @param {string | null} hospitalId @param {string} model @param {string | null} manufacturer */
   async function save(hospitalId, model, manufacturer = 'DemoMed') {
     fields = { client: null, hospital: 'Hospital Aurora', area: null, equipment: [
       { modality: 'tomógrafo', quantity: 'una', manufacturer, model, serial: 'SN-700', age: 'cinco años' },
     ] };
-    const text = `Visité Hospital Aurora. Vi un tomógrafo, cantidad una, fabricante ${manufacturer}, modelo ${model}, número de serie SN-700 y cinco años.`;
+    const text = `Visité Hospital Aurora. Vi un tomógrafo, cantidad una, ${manufacturer ? `fabricante ${manufacturer}, ` : ''}modelo ${model}, número de serie SN-700 y cinco años.`;
     const draft = await api('/api/drafts', { text });
     return api('/api/observations', { draftId: draft.id, reviewed: draft.reviewed, hospitalId });
   }
@@ -69,11 +69,62 @@ test('un conflicto conserva ambos valores y solo se resuelve con una explicació
     assert.equal(hospital.installedBase.changeHistory[0].author.name, 'Luis Demo');
     assert.equal(hospital.installedBase.changeHistory[0].reason, 'La visita de servicio verificó el modelo visible.');
 
+    const duplicate = hospital.installedBase.duplicateCandidates[0];
+    await context.api(`/api/duplicate-candidates/${duplicate.id}/decision`, { decision: 'consolidate' });
+    hospital = await context.api('/api/hospitals/' + first.hospitalId);
+    assert.equal(hospital.installedBase.items.length, 1);
+    assert.equal(hospital.installedBase.items[0].model, 'Alpha');
+    assert.equal(hospital.installedBase.conflicts.length, 0);
+    assert.equal(hospital.installedBase.conflictHistory[0].status, 'resolved');
+
     await context.app.close(); context = await start(directory);
     hospital = await context.api('/api/hospitals/' + first.hospitalId);
     assert.equal(hospital.installedBase.conflicts.length, 0);
     assert.equal(hospital.installedBase.changeHistory.length, 1);
     assert.ok(hospital.installedBase.items.every(/** @param {any} item */ item => item.model === 'Alpha'));
+  } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('una corrección reconoce corroboración previa y reabrir conserva la resolución anterior', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sitesignal-correction-order-'));
+  const context = await start(directory);
+  try {
+    await context.activate('Luis Demo');
+    const first = await context.save(null, 'Alpha', 'Acme');
+    await context.activate('Ana Demo');
+    const second = await context.save(first.hospitalId, 'Alpha', 'DemoMed');
+    let hospital = await context.api('/api/hospitals/' + first.hospitalId);
+    const corrected = hospital.installedBase.items.find(/** @param {any} item */ item => item.sourceObservationIds.includes(second.id));
+    await context.api(`/api/installed-equipment/${corrected.id}/corrections`, { field: 'manufacturer', value: 'Acme', reason: 'Mis notas confirman el fabricante reportado por Luis.' });
+    hospital = await context.api('/api/hospitals/' + first.hospitalId);
+    assert.equal(hospital.installedBase.conflicts.length, 0);
+    assert.ok(hospital.installedBase.items.every(/** @param {any} item */ item => item.fieldStates.manufacturer === 'Confirmado'));
+    assert.equal(hospital.installedBase.conflictHistory.length, 1);
+    assert.equal(hospital.installedBase.conflictHistory[0].status, 'resolved');
+
+    await context.api(`/api/installed-equipment/${corrected.id}/corrections`, { field: 'manufacturer', value: 'DemoMed', reason: 'Una revisión posterior vuelve a señalar DemoMed.' });
+    hospital = await context.api('/api/hospitals/' + first.hospitalId);
+    assert.equal(hospital.installedBase.conflicts.length, 1);
+    assert.equal(hospital.installedBase.conflictHistory.length, 2);
+    assert.ok(hospital.installedBase.conflictHistory.some(/** @param {any} conflict */ conflict => conflict.status === 'resolved'
+      && conflict.resolution.explanation === 'Mis notas confirman el fabricante reportado por Luis.'));
+  } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('un perfil asociado al equipo no confirma un campo que ese perfil nunca reportó', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sitesignal-field-provenance-'));
+  const context = await start(directory);
+  try {
+    await context.activate('Ana Demo');
+    const first = await context.save(null, 'Alpha', null);
+    await context.activate('Luis Demo');
+    await context.save(first.hospitalId, 'Alpha', 'Acme');
+    let hospital = await context.api('/api/hospitals/' + first.hospitalId);
+    await context.api(`/api/duplicate-candidates/${hospital.installedBase.duplicateCandidates[0].id}/decision`, { decision: 'consolidate' });
+    await context.save(first.hospitalId, 'Alpha', 'Acme');
+    hospital = await context.api('/api/hospitals/' + first.hospitalId);
+    assert.ok(hospital.installedBase.items.filter(/** @param {any} item */ item => item.manufacturer === 'Acme')
+      .every(/** @param {any} item */ item => item.fieldStates.manufacturer === 'Reportado'));
   } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
