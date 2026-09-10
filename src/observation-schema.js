@@ -35,13 +35,6 @@ function numeric(value) {
   const index = words.findIndex(group => group.some(word => normalized.split(/\W+/).includes(word)));
   return index === -1 ? null : index;
 }
-/** @param {string | null} value @param {string} source */
-function supportedNumber(value, source) {
-  const candidate = numeric(value);
-  if (candidate === null) return null;
-  const tokens = normalize(source).match(/\d+(?:[.,]\d+)?|[a-z]+/g) ?? [];
-  return tokens.some(token => numeric(token) === candidate) ? candidate : null;
-}
 /** @param {string | null} value */
 function modality(value) {
   if (!value) return null;
@@ -59,25 +52,47 @@ function ageInYears(value) {
  */
 export function reviewExtraction(raw, source) {
   const fields = rawSchema.parse(raw);
-  /** @param {string | null} value */
-  const supported = value => value && normalize(source).includes(normalize(value)) ? value : null;
   const normalizedSource = normalize(source);
+  /** @param {string} value */
+  const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  /** @param {string | null} value */
+  const supported = value => value && normalizedSource.includes(normalize(value)) ? value : null;
   /** @param {string | null} value @param {string} label */
   const anchored = (value, label) => {
     const accepted = supported(value);
     if (!accepted) return null;
     if (new RegExp(`\\b(?:${label})\\b`, 'i').test(normalize(accepted))) return accepted;
-    const quoted = normalize(accepted).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const quoted = escape(normalize(accepted));
     return new RegExp(`(?:${label})[^.\\n]{0,35}\\b${quoted}\\b`, 'i').test(normalizedSource) ? accepted : null;
   };
-  const equipment = fields.equipment.map(item => ({
-      modality: modality(supported(item.modality)), quantity: supportedNumber(item.quantity, source),
-      manufacturer: supported(item.manufacturer), model: supported(item.model), serial: supported(item.serial),
-      age: ageInYears(supported(item.age)),
-    }));
+  const equipment = fields.equipment.map(item => {
+    const rawModality = supported(item.modality);
+    const modalityText = normalize(rawModality ?? '');
+    const context = normalizedSource.split(/[.\n]+/).find(sentence => modalityText && sentence.includes(modalityText)) ?? '';
+    /** @param {string | null} value @param {string} label */
+    const equipmentField = (value, label) => {
+      const accepted = value && context.includes(normalize(value)) ? value : null;
+      if (!accepted) return null;
+      const quoted = escape(normalize(accepted));
+      return new RegExp(`(?:${label})[^,;.\\n]{0,30}\\b${quoted}\\b`, 'i').test(context) ? accepted : null;
+    };
+    const quantity = numeric(item.quantity);
+    const modalityIndex = context.indexOf(modalityText);
+    const quantitySupported = quantity === null ? null : [...context.matchAll(/\d+(?:[.,]\d+)?|[a-z]+/g)].some(match => {
+      const tokenIndex = match.index;
+      return numeric(match[0]) === quantity && ((tokenIndex <= modalityIndex && modalityIndex - tokenIndex <= 30) || /(?:cantidad|quantity|count)[^,;.\n]{0,20}$/.test(context.slice(0, tokenIndex)));
+    }) ? quantity : null;
+    return {
+      modality: modality(rawModality), quantity: quantitySupported,
+      manufacturer: equipmentField(item.manufacturer, 'fabricante|marca|manufacturer|brand|made by'),
+      model: equipmentField(item.model, 'modelo|model'),
+      serial: equipmentField(item.serial, 'numero de serie|número de serie|serial|s[\\s./-]*n'),
+      age: ageInYears(item.age && context.includes(normalize(item.age)) ? item.age : null),
+    };
+  });
   const unique = equipment.filter((item, index) => equipment.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(item)) === index);
   return reviewedSchema.parse({
-    client: anchored(fields.client, 'cliente|client|organizacion|organization|red'),
+    client: anchored(fields.client, 'cliente|client|organizacion|organization'),
     hospital: anchored(fields.hospital, 'hospital|clinica|clinic|centro medico|medical center'),
     area: anchored(fields.area, 'area|departamento|department|edificio|building'),
     equipment: unique,

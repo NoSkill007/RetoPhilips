@@ -97,3 +97,23 @@ test('la extracción no convierte meses en años ni conserva valores ausentes de
     assert.equal(draft.reviewed.equipment[0].manufacturer, null);
   } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
 });
+
+test('un dato presente en otro contexto no se atribuye al equipo', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sitesignal-context-'));
+  const source = 'Visité Hospital Modelo 3. Vi un tomógrafo en radiología.';
+  const app = await startApplication({ dataDirectory: directory, port: 0, probeQvac: async () => ({ state: 'ready', message: 'Listo' }),
+    extractText: async () => ({ fields: { client: null, hospital: 'Hospital Modelo 3', area: null, equipment: [{
+      modality: 'tomógrafo', quantity: '3', manufacturer: 'Modelo', model: 'Modelo 3', serial: '3', age: null,
+    }] }, metadata: { engine: 'test', model: 'fixture', durationMs: 1 } }) });
+  /** @param {string} path @param {unknown} body */
+  async function post(path, body) {
+    const response = await fetch(app.url + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    assert.ok(response.ok, await response.clone().text()); return response.json();
+  }
+  try {
+    const profile = await post('/api/profiles', { name: 'Eva Demo', role: 'Especialista' });
+    await post('/api/profiles/active', { profileId: profile.id });
+    const draft = await post('/api/drafts', { text: source });
+    assert.deepEqual(draft.reviewed.equipment[0], { modality: 'Tomografía computarizada', quantity: null, manufacturer: null, model: null, serial: null, age: null });
+  } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
+});
