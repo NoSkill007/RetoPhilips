@@ -80,17 +80,17 @@ function renderReview() {
   for (const hospital of hospitals) option(target, hospital.id, `${draft.candidates.some(/** @param {{id: string}} c */ c => c.id === hospital.id) ? 'Posible coincidencia · ' : ''}${hospital.name} · ${hospital.client ?? 'Cliente desconocido'}`);
   target.value = draft.candidates.length ? '' : 'new';
   const notice = el('validation-notice'); notice.replaceChildren();
-  if (draft.mode === 'manual') {
+  if (draft.provenance.kind === 'manual') {
     notice.hidden = false; notice.append(node('h3', 'Captura manual activada'), node('p', 'QVAC falló dos veces. El relato original está intacto; completa solo los datos que puedas revisar.'));
-  } else if (draft.retryCorrected) {
+  } else if (draft.provenance.retryCorrected) {
     notice.hidden = false; notice.append(node('h3', 'Extracción corregida'), node('p', 'La primera salida no fue válida. QVAC corrigió la extracción en el segundo y último intento.'));
   } else notice.hidden = true;
-  if (!notice.hidden && draft.validationIssues.length) {
+  if (!notice.hidden && draft.provenance.validationIssues.length) {
     const list = document.createElement('ul');
-    for (const issue of draft.validationIssues) list.append(node('li', issue));
+    for (const issue of draft.provenance.validationIssues) list.append(node('li', issue));
     notice.append(list);
   }
-  el('inference-info').textContent = draft.mode === 'manual' ? 'Procedencia: captura manual · La IA no produjo el resultado guardado.' : `${draft.inference.engine} · ${draft.inference.model} · ${(draft.inference.durationMs / 1000).toFixed(1)} s de inferencia · ${draft.attempts} intento${draft.attempts === 1 ? '' : 's'}`;
+  el('inference-info').textContent = draft.provenance.kind === 'manual' ? 'Procedencia: captura manual · La IA no produjo el resultado guardado.' : `${draft.provenance.metadata.engine} · ${draft.provenance.metadata.model} · ${(draft.provenance.metadata.durationMs / 1000).toFixed(1)} s de inferencia · ${draft.provenance.attempts} intento${draft.provenance.attempts === 1 ? '' : 's'}`;
   el('review').hidden = false; el('review').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 select('hospital-choice').addEventListener('change', () => {
@@ -113,7 +113,7 @@ form('capture-form').addEventListener('submit', async event => {
   try {
     draft = await api('/api/drafts', { text: input.value });
     hospitals = await api('/api/hospitals'); renderReview();
-    feedback(draft.mode === 'manual' ? 'QVAC falló dos veces. Completa la captura manual sin perder tu relato.' : 'Extracción lista. Revisa los datos antes de guardarlos.', draft.mode === 'manual');
+    feedback(draft.provenance.kind === 'manual' ? 'QVAC falló dos veces. Completa la captura manual sin perder tu relato.' : 'Extracción lista. Revisa los datos antes de guardarlos.', draft.provenance.kind === 'manual');
   } catch (error) { report(error); }
   finally { button.disabled = false; input.readOnly = false; }
 });
@@ -166,7 +166,10 @@ async function showHospital(id) {
     }
     const details = document.createElement('details'); details.append(node('summary', 'Texto original y procedencia'));
     const original = node('blockquote', observation.originalText); original.className = 'original';
-    details.append(original, node('p', `Capturada: ${new Date(observation.capturedAt).toLocaleString('es')} · ${observation.inference.engine} · ${observation.inference.model} · ${observation.inference.durationMs} ms`));
+    const provenance = observation.provenance.kind === 'manual'
+      ? `Captura manual tras ${observation.provenance.attempts} fallos de QVAC`
+      : `${observation.provenance.metadata.engine} · ${observation.provenance.metadata.model} · ${observation.provenance.metadata.durationMs} ms`;
+    details.append(original, node('p', `Capturada: ${new Date(observation.capturedAt).toLocaleString('es')} · ${provenance}`));
     article.append(details); target.append(article);
   }
 }

@@ -69,10 +69,12 @@ export function observationApi(db, extractText) {
       const reviewed = validResult?.reviewed ?? { client: null, hospital: null, area: null, equipment: [
         { modality: null, quantity: null, manufacturer: null, model: null, serial: null, age: null },
       ] };
-      const draft = { id: randomUUID(), mode: manual ? 'manual' : 'qvac', originalText: text, reviewed,
-        extracted: validResult?.extraction.fields ?? null, profile: collaborator,
-        inference: validResult?.inference ?? { engine: 'Manual', model: 'No aplicado', durationMs: 0 },
-        capturedAt, attempts: Math.min(attempts, 2), retryCorrected: Boolean(validResult && attempts === 2), validationIssues: [...new Set(validationIssues)] };
+      const issues = [...new Set(validationIssues)];
+      const provenance = validResult
+        ? { kind: 'qvac', metadata: validResult.inference, attempts, retryCorrected: attempts === 2, validationIssues: issues }
+        : { kind: 'manual', attempts: 2, validationIssues: issues };
+      const draft = { id: randomUUID(), originalText: text, reviewed,
+        extracted: validResult?.extraction.fields ?? null, profile: collaborator, provenance, capturedAt };
       db.prepare('INSERT INTO drafts VALUES (?, ?)').run(draft.id, JSON.stringify(draft));
       const hospitals = db.prepare('SELECT * FROM hospitals ORDER BY name').all();
       const needle = normalize(reviewed.hospital ?? '');
@@ -104,8 +106,7 @@ export function observationApi(db, extractText) {
         }
         const observation = { id: randomUUID(), hospitalId: hospital.id, originalText: draft.originalText,
           reviewed: { ...input.reviewed, hospital: hospital.name, client: hospital.client }, extracted: draft.extracted,
-          profile: draft.profile, inference: draft.inference, mode: draft.mode, attempts: draft.attempts,
-          retryCorrected: draft.retryCorrected, validationIssues: draft.validationIssues,
+          profile: draft.profile, provenance: draft.provenance,
           capturedAt: draft.capturedAt, createdAt: new Date().toISOString() };
         db.prepare('INSERT INTO observations VALUES (?, ?, ?, ?)').run(observation.id, input.draftId, observation.hospitalId, JSON.stringify(observation));
         db.exec('COMMIT');

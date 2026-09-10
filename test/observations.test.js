@@ -43,7 +43,8 @@ test('un colaborador revisa la extracción, guarda y consulta su procedencia en 
     assert.equal(hospital.observations[0].reviewed.equipment[0].quantity, 3);
     assert.equal(hospital.observations[0].reviewed.equipment[0].model, null);
     assert.equal(hospital.observations[0].profile.name, 'Ana Demo');
-    assert.equal(hospital.observations[0].inference.engine, 'deterministic-test');
+    assert.equal(hospital.observations[0].provenance.kind, 'qvac');
+    assert.equal(hospital.observations[0].provenance.metadata.engine, 'deterministic-test');
     assert.ok(hospital.observations[0].createdAt);
   } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
 });
@@ -114,9 +115,9 @@ test('un dato presente en otro contexto no se atribuye al equipo', async () => {
     const profile = await post('/api/profiles', { name: 'Eva Demo', role: 'Especialista' });
     await post('/api/profiles/active', { profileId: profile.id });
     const draft = await post('/api/drafts', { text: source });
-    assert.equal(draft.mode, 'manual');
+    assert.equal(draft.provenance.kind, 'manual');
     assert.deepEqual(draft.reviewed.equipment[0], { modality: null, quantity: null, manufacturer: null, model: null, serial: null, age: null });
-    assert.ok(draft.validationIssues.length > 0);
+    assert.ok(draft.provenance.validationIssues.length > 0);
   } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -138,7 +139,7 @@ test('dos equipos en la misma oración no intercambian sus datos', async () => {
     const profile = await post('/api/profiles', { name: 'Eva Demo', role: 'Especialista' });
     await post('/api/profiles/active', { profileId: profile.id });
     const draft = await post('/api/drafts', { text: source });
-    assert.equal(draft.mode, 'manual');
+    assert.equal(draft.provenance.kind, 'manual');
     assert.deepEqual(draft.reviewed.equipment.map(/** @param {{quantity: number | null, manufacturer: string | null}} item */ item => ({ quantity: item.quantity, manufacturer: item.manufacturer })), [
       { quantity: null, manufacturer: null },
     ]);
