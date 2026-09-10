@@ -27,6 +27,7 @@ export async function startApplication({ dataDirectory, port, probeQvac, qvacSta
     ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
     ['/style.css', ['style.css', 'text/css; charset=utf-8']],
     ['/capture.js', ['capture.js', 'text/javascript; charset=utf-8']],
+    ['/panorama.js', ['panorama.js', 'text/javascript; charset=utf-8']],
   ]);
   const server = createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');

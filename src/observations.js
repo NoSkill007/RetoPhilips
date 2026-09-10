@@ -4,6 +4,7 @@ import { profileSchema, activeSchema, captureSchema, saveSchema, inferenceSchema
 import { assessObservation, confidencePolicy, nextFollowUp } from './confidence.js';
 import { installedBase } from './installed-base.js';
 import { RequestError } from './request-error.js';
+import { regionalPanorama } from './regional-panorama.js';
 
 const followUpAnswerSchema = z.object({ answer: z.union([z.string().trim().min(1).max(300), z.number(), z.null()]) }).strict();
 const duplicateDecisionSchema = z.object({ decision: z.enum(['keep-separate', 'consolidate']) }).strict();
@@ -22,6 +23,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
     CREATE TABLE IF NOT EXISTS observations (id TEXT PRIMARY KEY, draft_id TEXT UNIQUE NOT NULL, hospital_id TEXT NOT NULL, data TEXT NOT NULL);
   `);
   const base = installedBase(db, now);
+  const regional = regionalPanorama(db, now);
   /** @param {string} id */
   function profile(id) {
     const row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(id);
@@ -48,6 +50,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
   }
   /** @param {string} method @param {string} path @param {unknown} body */
   return async function handle(method, path, body) {
+    if (new URL(path, 'http://sitesignal.local').pathname === '/api/panorama' || path === '/api/demo/reset') return regional.handle(method, path);
     if (path === '/api/profiles' && method === 'GET') return {
       profiles: db.prepare('SELECT * FROM profiles ORDER BY name').all(),
       activeProfileId: db.prepare("SELECT value FROM preferences WHERE key = 'activeProfile'").get()?.value ?? null,
@@ -173,7 +176,11 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
     if (path.startsWith('/api/hospitals/') && method === 'GET') {
       const id = z.uuid().parse(path.slice('/api/hospitals/'.length));
       const hospital = db.prepare('SELECT * FROM hospitals WHERE id = ?').get(id);
-      if (!hospital) throw new RequestError(404, 'El hospital no existe.');
+      if (!hospital) {
+        const fictionalHospital = regional.hospital(id);
+        if (fictionalHospital) return fictionalHospital;
+        throw new RequestError(404, 'El hospital no existe.');
+      }
       return { ...hospital, installedBase: base.present(id), observations: db.prepare('SELECT data FROM observations WHERE hospital_id = ? ORDER BY rowid DESC').all(id).map(row => presentObservation(JSON.parse(String(row.data)))) };
     }
     if (path === '/api/observations' && method === 'POST') {

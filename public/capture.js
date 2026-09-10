@@ -208,7 +208,7 @@ form('review-form').addEventListener('submit', async event => {
       hospitalId: select('hospital-choice').value === 'new' ? null : select('hospital-choice').value,
       splitGroupId: select('split-group-choice').value || null });
     draft = null; el('review').hidden = true; form('capture-form').reset();
-    await loadHospitals(); await showHospital(saved.hospitalId); feedback('Observación guardada con su texto original y procedencia.');
+    await loadHospitals(); await showHospital(saved.hospitalId); window.dispatchEvent(new CustomEvent('sitesignal:panorama-refresh')); feedback('Observación guardada con su texto original y procedencia.');
     el('hospital-view').scrollIntoView({ behavior: 'smooth' });
   } catch (error) { report(error); }
   finally { button.disabled = false; }
@@ -227,6 +227,7 @@ async function decideDuplicate(hospitalId, candidateId, decision) {
   try {
     await api(`/api/duplicate-candidates/${candidateId}/decision`, { decision });
     await showHospital(hospitalId);
+    window.dispatchEvent(new CustomEvent('sitesignal:panorama-refresh'));
     feedback(decision === 'consolidate' ? 'Equipos consolidados con toda su procedencia.' : 'Los equipos se conservaron separados.');
   } catch (error) { report(error); }
 }
@@ -235,14 +236,14 @@ async function correctEquipment(hospitalId, itemId, field, rawValue, reason) {
   const value = rawValue.trim() === '' ? null : ['quantity', 'age'].includes(field) ? Number(rawValue) : rawValue.trim();
   try {
     await api(`/api/installed-equipment/${itemId}/corrections`, { field, value, reason });
-    await showHospital(hospitalId); feedback('Corrección guardada como dato reportado en el historial.');
+    await showHospital(hospitalId); window.dispatchEvent(new CustomEvent('sitesignal:panorama-refresh')); feedback('Corrección guardada como dato reportado en el historial.');
   } catch (error) { report(error); }
 }
 /** @param {string} hospitalId @param {string} conflictId @param {string} serializedValue @param {string} explanation */
 async function resolveConflict(hospitalId, conflictId, serializedValue, explanation) {
   try {
     await api(`/api/conflicts/${conflictId}/resolve`, { value: JSON.parse(serializedValue), explanation });
-    await showHospital(hospitalId); feedback('Conflicto resuelto con explicación y registro de cambios.');
+    await showHospital(hospitalId); window.dispatchEvent(new CustomEvent('sitesignal:panorama-refresh')); feedback('Conflicto resuelto con explicación y registro de cambios.');
   } catch (error) { report(error); }
 }
 /** @param {string} id */
@@ -269,7 +270,7 @@ async function showHospital(id) {
     const reason = document.createElement('textarea'); reason.placeholder = 'Motivo de la corrección'; reason.maxLength = 500; reason.rows = 2;
     const saveCorrection = document.createElement('button'); saveCorrection.type = 'button'; saveCorrection.textContent = 'Guardar corrección';
     saveCorrection.addEventListener('click', () => correctEquipment(id, item.id, correctionFields.value, correctionValue.value, reason.value));
-    correction.append(correctionFields, correctionValue, reason, saveCorrection); card.append(correction);
+    correction.append(correctionFields, correctionValue, reason, saveCorrection); if (!hospital.fictional) card.append(correction);
     base.append(card);
   }
   target.append(base);
@@ -334,11 +335,15 @@ async function showHospital(id) {
     }
     const details = document.createElement('details'); details.append(node('summary', 'Texto original y procedencia'));
     const original = node('blockquote', observation.originalText); original.className = 'original';
-    const provenance = observation.provenance.kind === 'manual'
+    const provenance = observation.provenance.kind === 'seed' ? `Dataset sintético ficticio · ${observation.provenance.dataset}` : observation.provenance.kind === 'manual'
       ? `Captura manual tras ${observation.provenance.attempts} fallos de QVAC`
       : `${observation.provenance.metadata.engine} · ${observation.provenance.metadata.model} · ${observation.provenance.metadata.durationMs} ms`;
     details.append(original, node('p', `Capturada: ${new Date(observation.capturedAt).toLocaleString('es')} · ${provenance}`));
     article.append(details); target.append(article);
   }
 }
+window.addEventListener('sitesignal:hospital', event => {
+  const id = event instanceof CustomEvent ? event.detail : null;
+  if (typeof id === 'string') showHospital(id).then(() => el('hospital-view').scrollIntoView({ behavior: 'smooth' })).catch(report);
+});
 Promise.all([loadProfiles(), loadHospitals()]).catch(report);
