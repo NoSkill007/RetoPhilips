@@ -5,7 +5,9 @@ import { opportunities, isStale } from './opportunities.js';
 import { regionFor } from './region.js';
 import { coordinatesFor } from './geo.js';
 
-const DATASET_ID = 'sitesignal-fictional-latam-v3';
+// v4: real medical-equipment manufacturer/model catalog replaces the old generic
+// "Fabricante Ficticio 1/2/3" / "Modelo Ficticio A" placeholders (see equipmentCatalog below).
+const DATASET_ID = 'sitesignal-fictional-latam-v4';
 /** Fixed to the original 7-category catalog so the deterministic demo dataset (and its documented
  * natural-query scenarios) stays stable as the full modality catalog grows. */
 const demoModalities = ['Resonancia magnética', 'Tomografía computarizada', 'Ultrasonido', 'Monitoreo de pacientes', 'Rayos X', 'Sistema intervencionista', 'Otro'];
@@ -32,6 +34,39 @@ const people = [
   ['Camila Ríos Ficticia', 'Especialista'],
 ];
 
+/** Real medical-equipment manufacturers and plausible model names, one pool per demo modality — the
+ * hospital, client and collaborator identities stay entirely fictional (the project's non-negotiable
+ * rule), but the equipment itself is exactly what a service engineer would actually find installed:
+ * these are public brand names for commercial products, not anyone's private data. Replaces the
+ * earlier generic "Fabricante Ficticio 1/2/3" / "Modelo Ficticio A" placeholders, which repeated
+ * identically across every modality and read as unfinished rather than as a credible installed base.
+ * @type {Record<string, [string, string][]>} */
+const equipmentCatalog = {
+  'Resonancia magnética': [
+    ['Philips', 'Ingenia Elition X'], ['GE Healthcare', 'SIGNA Premier'],
+    ['Siemens Healthineers', 'MAGNETOM Sola'], ['Canon Medical', 'Vantage Galan 3T'],
+  ],
+  'Tomografía computarizada': [
+    ['Philips', 'Incisive CT'], ['GE Healthcare', 'Revolution EVO'],
+    ['Siemens Healthineers', 'SOMATOM go.Top'], ['Canon Medical', 'Aquilion Prime SP'],
+  ],
+  Ultrasonido: [
+    ['Philips', 'EPIQ Elite'], ['GE Healthcare', 'Voluson E10'], ['Siemens Healthineers', 'ACUSON Sequoia'],
+    ['Canon Medical', 'Aplio i800'], ['Mindray', 'Resona 7'],
+  ],
+  'Monitoreo de pacientes': [
+    ['Philips', 'IntelliVue MX750'], ['GE Healthcare', 'CARESCAPE B650'], ['Mindray', 'BeneVision N22'],
+  ],
+  'Rayos X': [
+    ['Philips', 'DigitalDiagnost C90'], ['GE Healthcare', 'Definium Tempo'],
+    ['Siemens Healthineers', 'Ysio Max'], ['Canon Medical', 'RADREX-i'],
+  ],
+  'Sistema intervencionista': [
+    ['Philips', 'Azurion 7'], ['GE Healthcare', 'Allia IGS 7'], ['Siemens Healthineers', 'ARTIS icono'],
+  ],
+  Otro: [['Philips', 'HeartStart Intrepid'], ['Mindray', 'BeneHeart D6'], ['ZOLL', 'X Series']],
+};
+
 /** @param {string} prefix @param {number} number */
 function uuid(prefix, number) { return `${prefix}${String(number).padStart(7, '0')}-0000-4000-8000-${String(number).padStart(12, '0')}`; }
 
@@ -41,11 +76,12 @@ function seedRows() {
     return Array.from({ length: 6 }, (_, equipmentIndex) => {
       const number = hospitalIndex * 6 + equipmentIndex + 1;
       const [person, role] = people[(hospitalIndex + equipmentIndex) % people.length];
+      const modality = demoModalities[(hospitalIndex + equipmentIndex) % demoModalities.length];
+      const catalog = equipmentCatalog[modality];
+      const [manufacturer, model] = catalog[(hospitalIndex + equipmentIndex) % catalog.length];
       return {
         id: uuid('2', number), hospitalId, client, hospital: name, country, city, region: regionFor(country),
-        modality: demoModalities[(hospitalIndex + equipmentIndex) % demoModalities.length],
-        manufacturer: `Fabricante Ficticio ${(equipmentIndex % 3) + 1}`,
-        model: `Modelo Ficticio ${String.fromCharCode(65 + (hospitalIndex + equipmentIndex) % 8)}`,
+        modality, manufacturer, model,
         serial: `FIC-${String(number).padStart(3, '0')}`,
         age: 2 + ((hospitalIndex * 3 + equipmentIndex) % 11),
         capturedAt: capturedDates[equipmentIndex],
