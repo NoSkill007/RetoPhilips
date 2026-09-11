@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SiteSignal · Inteligencia de base instalada, 100% local</title>
+<meta name="description" content="SiteSignal convierte lo que un colaborador observa en una visita hospitalaria en una base instalada confiable — con toda la IA corriendo en la computadora, sin nube.">
+<style>
+:root{
+  --blue:#0b5fd1; --blue-strong:#074aa6; --blue-soft:#eaf2ff; --blue-light:#69a7ff;
+  --ink:#eef4ff; --muted:#aab6c8; --subtle:#7e8ba0; --bg:#0b1320; --surface:#111c2c;
+  --surface-2:#162235; --line:#26364d; --success:#52d49a; --warning:#ffc66d; --danger:#ff8290;
+  --r-sm:10px; --r:16px; --r-lg:22px;
+  font-family:Inter,"Segoe UI",system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.55}
+img,svg{max-width:100%}
+a{color:var(--blue-light)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+header.top{position:sticky;top:0;z-index:5;background:rgba(11,19,32,.85);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 24px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;color:var(--ink);text-decoration:none}
+.brand .mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:var(--blue);color:#fff;font-weight:800}
+.topbar nav{display:flex;gap:22px}
+.topbar nav a{color:var(--muted);text-decoration:none;font-size:14px;font-weight:600}
+.topbar nav a:hover{color:var(--ink)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:999px;font-weight:700;font-size:14px;text-decoration:none;border:1px solid var(--line)}
+.btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+.btn.primary:hover{background:var(--blue-strong)}
+.btn.ghost{color:var(--ink)}
+.btn.ghost:hover{background:var(--surface)}
+section{padding:96px 0}
+section.tight{padding:64px 0}
+.eyebrow{color:var(--blue-light);font-size:12px;font-weight:800;letter-spacing:2px;text-transform:uppercase}
+h1{font-size:clamp(34px,5.5vw,58px);line-height:1.08;letter-spacing:-1.5px;margin:16px 0;font-weight:800}
+h2{font-size:clamp(26px,3.5vw,36px);letter-spacing:-.8px;margin:0 0 14px;font-weight:800}
+.lede{font-size:19px;color:var(--muted);max-width:640px;margin:0 0 32px}
+.hero{position:relative;overflow:hidden}
+.hero .glow{position:absolute;top:-220px;right:-160px;width:640px;height:640px;border-radius:50%;background:radial-gradient(circle,rgba(11,95,209,.35),transparent 70%);pointer-events:none}
+.hero-actions{display:flex;gap:14px;flex-wrap:wrap;margin-top:6px}
+.badge-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:36px}
+.pill{background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-size:12.5px;color:var(--muted);font-weight:600}
+.pill b{color:var(--success)}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:26px}
+.card .icon{display:grid;place-items:center;width:52px;height:52px;border-radius:14px;background:var(--surface-2);margin-bottom:18px}
+.card h3{margin:0 0 10px;font-size:17px}
+.card p{margin:0;color:var(--muted);font-size:14px}
+section.light{background:#f5f7fb;color:#162033}
+section.light .eyebrow{color:var(--blue)}
+section.light h2{color:#162033}
+section.light .lede{color:#556070}
+section.light .card{background:#fff;border-color:#e3e8f0}
+section.light .card p{color:#556070}
+section.light .card .icon{background:var(--blue-soft)}
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:stretch}
+.flow-step{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:24px 18px;text-align:center;position:relative}
+.flow-step .num{display:inline-grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--blue);color:#fff;font-weight:800;font-size:15px;margin-bottom:14px}
+.flow-step h4{margin:0 0 6px;font-size:15px;color:var(--ink)}
+.flow-step p{margin:0;color:var(--muted);font-size:12.5px}
+.states{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.state{border-radius:var(--r);padding:22px;border:1px solid var(--line);background:var(--surface)}
+.state .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px}
+.state h4{margin:10px 0 8px;font-size:15px}
+.state p{margin:0;color:var(--muted);font-size:12.5px}
+.confirmado .dot{background:var(--success)} .reportado .dot{background:var(--blue-light)}
+.estimado .dot{background:var(--warning)} .desconocido .dot{background:var(--subtle)}
+.mockup{border-radius:var(--r-lg);border:1px solid var(--line);background:var(--surface);overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.4)}
+.mockup .bar{display:flex;gap:6px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.mockup .bar span{width:10px;height:10px;border-radius:50%;background:var(--line)}
+.mockup .body{padding:24px}
+.mockup .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+.mockup .kpi{background:var(--surface-2);border-radius:12px;padding:14px}
+.mockup .kpi b{display:block;font-size:22px;color:var(--ink)}
+.mockup .kpi span{font-size:11px;color:var(--muted)}
+.mockup .bar-chart{display:grid;gap:8px}
+.mockup .row{display:grid;grid-template-columns:90px 1fr 30px;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
+.mockup .row i{height:8px;border-radius:99px;background:var(--blue)}
+.cta{background:linear-gradient(135deg,var(--blue),var(--blue-strong));border-radius:var(--r-lg);padding:48px;text-align:center}
+.cta h2{color:#fff}
+.cta p{color:#dce9ff;max-width:560px;margin:0 auto 28px;font-size:16px}
+.cta .btn.primary{background:#fff;color:var(--blue-strong);border-color:#fff}
+.cta .btn.ghost{border-color:rgba(255,255,255,.4);color:#fff}
+.notice{border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:18px 22px;font-size:13.5px;color:var(--muted);display:flex;gap:12px;align-items:flex-start}
+footer{border-top:1px solid var(--line);padding:36px 0;color:var(--subtle);font-size:12.5px}
+footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+@media(max-width:820px){
+  .grid3,.grid2,.flow,.states{grid-template-columns:1fr}
+  .topbar nav{display:none}
+  section{padding:64px 0}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="topbar">
+    <a class="brand" href="#top"><span class="mark">S</span> SiteSignal</a>
+    <nav>
+      <a href="#problema">El problema</a>
+      <a href="#funciones">Funciones</a>
+      <a href="#como-funciona">Cómo funciona</a>
+      <a href="#privacidad">Privacidad</a>
+    </nav>
+    <a class="btn primary" href="https://github.com/NoSkill007/RetoPhilips">Ver en GitHub</a>
+  </div>
+</header>
+
+<main id="top">
+
+<section class="hero">
+  <div class="glow"></div>
+  <div class="wrap">
+    <p class="eyebrow">Reto corporativo · Inteligencia de Base Instalada de Clientes · Philips</p>
+    <h1>Inteligencia de base<br>instalada, 100% local.</h1>
+    <p class="lede">SiteSignal convierte lo que un ingeniero de servicio, vendedor o especialista observa en una visita hospitalaria en una base instalada confiable y consultable — sin que ningún dato salga de la computadora.</p>
+    <div class="hero-actions">
+      <a class="btn primary" href="https://github.com/NoSkill007/RetoPhilips">Ver el repositorio</a>
+      <a class="btn ghost" href="https://github.com/NoSkill007/RetoPhilips/blob/main/DEMO.md">Guion de demostración</a>
+    </div>
+    <div class="badge-row">
+      <span class="pill"><b>●</b> IA 100% local con QVAC</span>
+      <span class="pill">Sin datos reales de pacientes o clientes</span>
+      <span class="pill">Sin frameworks de frontend</span>
+    </div>
+  </div>
+</section>
+
+<section class="light" id="problema">
+  <div class="wrap">
+    <p class="eyebrow">El problema</p>
+    <h2>El conocimiento sobre los equipos instalados vive disperso — y se pierde</h2>
+    <p class="lede">Nadie lo consolida, nadie lo contrasta, y las decisiones de renovación se toman con información vieja o incompleta.</p>
+    <div class="grid3">
+      <div class="card">
+        <div class="icon">🧠</div>
+        <h3>En la cabeza de las personas</h3>
+        <p>Cada visita genera conocimiento valioso que rara vez queda en un registro estructurado y consultable.</p>
+      </div>
+      <div class="card">
+        <div class="icon">⚠️</div>
+        <h3>Sin contraste ni evidencia</h3>
+        <p>Nadie valida un dato contra otro reporte ni contra una foto real de la placa del equipo.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🕒</div>
+        <h3>Decisiones con datos viejos</h3>
+        <p>Las oportunidades de renovación se identifican tarde, sin una vista regional confiable y actualizada.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="funciones">
+  <div class="wrap">
+    <p class="eyebrow">Qué hace SiteSignal</p>
+    <h2>De un relato de campo a un dato confiable</h2>
+    <p class="lede">Captura, extracción local, revisión humana y confianza explicable — todo en una sola aplicación.</p>
+    <div class="grid2">
+      <div class="card">
+        <div class="icon">✍️</div>
+        <h3>Captura sin fricción</h3>
+        <p>Escribe o dicta el relato de la visita en español o inglés. Un modelo QVAC (Qwen3 4B) lo estructura localmente, sin inventar lo que el texto no respalda.</p>
+      </div>
+      <div class="card">
+        <div class="icon">✅</div>
+        <h3>Revisión humana obligatoria</h3>
+        <p>Nada se guarda sin que un colaborador confirme la interpretación. La IA propone, la persona decide.</p>
+      </div>
+      <div class="card">
+        <div class="icon">📷</div>
+        <h3>Evidencia fotográfica</h3>
+        <p>Sube una foto de la placa del equipo; OCR local extrae fabricante, modelo, serie y año, sin depender de la nube.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🔀</div>
+        <h3>Duplicados y conflictos</h3>
+        <p>Nunca se resuelven solos: la app sugiere candidatos y diferencias lado a lado, pero solo una decisión humana consolida.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🗺️</div>
+        <h3>Panorama regional</h3>
+        <p>Mapa real, filtros por país, ciudad y modalidad, y preguntas en lenguaje natural que QVAC traduce a filtros visibles.</p>
+      </div>
+      <div class="card">
+        <div class="icon">📈</div>
+        <h3>Oportunidades explicables</h3>
+        <p>Señala equipos candidatos a renovación con sus condiciones visibles — nunca una recomendación de caja negra.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="light" id="como-funciona">
+  <div class="wrap">
+    <p class="eyebrow">Cómo funciona</p>
+    <h2>Cuatro pasos, con procedencia siempre visible</h2>
+    <div class="flow">
+      <div class="flow-step"><span class="num">1</span><h4>Capturar</h4><p>Texto o dictado, en español o inglés</p></div>
+      <div class="flow-step"><span class="num">2</span><h4>Extraer</h4><p>QVAC local — Qwen3 4B</p></div>
+      <div class="flow-step"><span class="num">3</span><h4>Revisar</h4><p>Confirmación humana obligatoria</p></div>
+      <div class="flow-step"><span class="num">4</span><h4>Base instalada</h4><p>Confianza explicable por campo</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="confianza">
+  <div class="wrap">
+    <p class="eyebrow">Confianza explicable</p>
+    <h2>Nunca una caja negra</h2>
+    <p class="lede">Cada dato muestra su propio estado, y el puntaje que lo respalda: 40 pts de completitud, 25 de vigencia y 35 de evidencia o confirmación independiente.</p>
+    <div class="states">
+      <div class="state confirmado"><span class="dot"></span>Confirmado<h4></h4><p>Evidencia directa (foto) o confirmación independiente entre dos perfiles.</p></div>
+      <div class="state reportado"><span class="dot"></span>Reportado<h4></h4><p>Respaldado por al menos una observación de campo revisada.</p></div>
+      <div class="state estimado"><span class="dot"></span>Estimado<h4></h4><p>Un valor aproximado que el propio relato reconoce como incierto.</p></div>
+      <div class="state desconocido"><span class="dot"></span>Desconocido<h4></h4><p>Sin dato disponible todavía — nunca se inventa un valor.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="light" id="vista">
+  <div class="wrap">
+    <p class="eyebrow">Panorama regional</p>
+    <h2>Una vista consultable de toda la región</h2>
+    <p class="lede">Vista simplificada del panorama — la aplicación real corre localmente e incluye un mapa Leaflet interactivo, filtros completos y perfiles de hospital navegables.</p>
+    <div class="mockup">
+      <div class="bar"><span></span><span></span><span></span></div>
+      <div class="body">
+        <div class="kpis">
+          <div class="kpi"><b>12</b><span>Hospitales</span></div>
+          <div class="kpi"><b>72</b><span>Equipos</span></div>
+          <div class="kpi"><b>52%</b><span>Confianza media</span></div>
+        </div>
+        <div class="bar-chart">
+          <div class="row"><span>Panamá</span><i style="width:70%"></i><b>35</b></div>
+          <div class="row"><span>Brasil</span><i style="width:52%"></i><b>18</b></div>
+          <div class="row"><span>Colombia</span><i style="width:52%"></i><b>18</b></div>
+          <div class="row"><span>México</span><i style="width:18%"></i><b>6</b></div>
+          <div class="row"><span>Chile</span><i style="width:18%"></i><b>6</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="privacidad">
+  <div class="wrap">
+    <p class="eyebrow">Privacidad</p>
+    <h2>Privado por diseño</h2>
+    <p class="lede">Toda la inteligencia artificial corre en la computadora del colaborador. La única petición de red opcional en ejecución son las teselas del mapa base — y todo sigue funcionando sin ella.</p>
+    <div class="notice">
+      <span>ℹ️</span>
+      <span>Esta página es una presentación estática, alojada en GitHub Pages. La aplicación real no puede alojarse en un servidor público: su requisito no-negociable es que los modelos de IA (Qwen3 4B, Whisper, EasyOCR) nunca salgan de la computadora donde corre. Para probarla a fondo, instala el repositorio localmente.</span>
+    </div>
+  </div>
+</section>
+
+<section class="tight">
+  <div class="wrap">
+    <div class="cta">
+      <h2>Pruébala a fondo, instalando el repositorio</h2>
+      <p>Sigue el inicio rápido del README: prepara QVAC una vez con conexión, y luego corre todo sin nube, incluida la captura, la voz y la evidencia fotográfica.</p>
+      <div class="hero-actions" style="justify-content:center">
+        <a class="btn primary" href="https://github.com/NoSkill007/RetoPhilips#inicio-rápido-windows-con-conexión-la-primera-vez">Instrucciones de instalación</a>
+        <a class="btn ghost" href="https://github.com/NoSkill007/RetoPhilips">Repositorio en GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>SiteSignal · Prototipo con datos sintéticos</span>
+    <span>Todo dato de demostración es ficticio. No se incluye información de pacientes o clientes reales.</span>
+  </div>
+</footer>
+
+</body>
+</html>
