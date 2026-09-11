@@ -31,7 +31,9 @@ Los tickets del arranque local a las consultas naturales están terminados:
 | #8 | Conflictos, correcciones e historial auditable | `3a07139`, `a3121dc` |
 | #9 | Panorama regional offline | `4925691` |
 | #10 | Consultas naturales seguras y filtros visibles | `aaedf66` |
-| #11 | Oportunidades potenciales explicables | pendiente de commit |
+| #11 | Oportunidades potenciales explicables | `04c0853` |
+| #12 | Dictado y transcripción local | pendiente de commit |
+| #13 | Evidencia fotográfica local (placas ficticias) | pendiente de commit |
 
 El panorama incluye un dataset reiniciable de 10 hospitales y 60 equipos ficticios en Panamá, Brasil y Colombia. Sus filtros, mapa SVG local, métricas y agregaciones también incorporan las capturas locales sin permitir que “Restablecer demo” las borre. Los perfiles 360 ficticios son navegables desde la lista regional.
 
@@ -70,14 +72,33 @@ Una segunda ronda de pruebas (50 relatos reales con QVAC, 25 en español y 25 en
 
 Estas correcciones vienen de leer el brief oficial de Philips (`doc-1788886999143-c967da0a.docx`, aportado por el usuario) y comparar sus ejemplos textuales contra el validador. El brief también pide capturar Ciudad y País como parte de "Customer" — se implementó en la misma sesión: `hospitals` ahora tiene columnas `city`/`country` (con migración segura para bases de datos ya existentes sin esas columnas), el schema y el validador los extraen con el mismo fallback de proximidad al nombre del hospital, y el panorama regional ya no muestra "Ubicación no informada"/"Ciudad no informada" para hospitales capturados que sí las reportaron.
 
+El ticket #12 agrega dictado local: la sección "Dictar la observación" (`public/voice.js`, `public/index.html`) graba audio con `MediaRecorder`, lo decodifica y reencoda como WAV mono 16 bits en el propio navegador (evita depender de qué contenedor/códec haya elegido el navegador; whisper.cpp decodifica WAV directamente) y lo sube a `POST /api/transcriptions?language=es|en`. El servidor lo transcribe con QVAC (Whisper small Q8_0 multilingüe, `src/voice-worker.js` + `src/voice-runtime.js`, mismo patrón de proceso hijo/IPC que `text-runtime.js`) y devuelve `{transcript, metadata}`. La transcripción llena el mismo `#observation` y sigue el flujo existente sin lógica nueva de extracción — "continuar por el mismo flujo confiable" se logra por reutilización, no por duplicación. Un fallo de transcripción dispara un mensaje de reintento y conserva la grabación (el audio vive en el navegador hasta que el usuario la descarta); no deja el servicio inutilizable para el siguiente intento (probado). El idioma es una config de carga del modelo Whisper (no por-llamada), así que cambiar de idioma entre grabaciones recarga el modelo en el worker.
+
+Tras probar el dictado con voz real (no las muestras TTS sintéticas), la calidad de transcripción no era suficiente. Dos ajustes en la misma sesión: (1) `src/voice-worker.js` solo pasaba `language` a Whisper, sin afinar decodificación — se agregaron `strategy: 'greedy'`, `temperature: 0`, `suppress_blank`/`suppress_nst`, `entropy_thold`/`logprob_thold` (valores recomendados por el propio ejemplo del SDK); (2) se subió el modelo de Whisper "base" (82 MB) a "small" (264 MB, `scripts/prepare-voice-model.js`), que en las muestras de prueba produjo texto más coherente ("ocho años" en vez de "8", "Demomed"/"Ecodemo" más cercanos a los nombres reales que la versión con guion suelto de "base"). Si la precisión sigue sin ser suficiente con voz real, el siguiente paso sería `WHISPER_LARGE_V3_TURBO` (~1.6 GB).
+
+Modelo de voz preparado (Whisper small Q8_0, multilingüe, ~264 MB):
+
+```text
+C:\Users\kenet\.qvac\models\8a583e4a84f1fe91_ggml-small-q8_0.bin
+```
+
+Configúralo con `SITESIGNAL_VOICE_MODEL` (además de `SITESIGNAL_MODEL`) antes de `npm start` para que el dictado funcione; sin esa variable el dictado queda deshabilitado (`/api/status` reporta `voice: unavailable`) pero la captura escrita sigue intacta.
+
+Las muestras de audio sintéticas bundleadas (`test/fixtures/voice-sample-es.wav`, `voice-sample-en.wav`) se generaron localmente con la TTS de QVAC (Supertonic multilingüe, `scripts/generate-voice-samples.js`) — mismo enfoque "sin nube, todo sintético" que el resto del dataset. `npm run qvac:check:voice` las transcribe con QVAC real como prueba de humo separada de la suite rápida (que usa un `transcribeAudio` determinista inyectado, igual que `extractText`).
+
+El ticket #13 agrega evidencia fotográfica local: cada tarjeta de equipo en el formulario de revisión (`public/capture.js`, sección desplegable "Adjuntar evidencia fotográfica") permite subir una foto de una placa/etiqueta ficticia. El navegador la envía a `POST /api/evidence` (`public/evidence.js`), que la procesa con OCR local de QVAC (`src/plate-runtime.js`, mismo patrón de proceso hijo/IPC que `text-runtime.js` y `voice-runtime.js`, modelo `OCR_LATIN` con `detectorModelSrc: OCR_CRAFT` — QVAC exige un detector explícito para cargar el reconocedor desde una ruta local, aunque el detector en sí se resuelve por su constante de registro y no por ruta). `src/plate-extraction.js` interpreta el texto detectado de forma determinista (sin LLM): busca secuencias de etiqueta conocidas ("modelo", "número de serie", "fabricante", "fecha de fabricación", etc., en español e inglés) y solo devuelve como campo el bloque de OCR que sigue a una etiqueta reconocida; un fabricante sin etiqueta se acepta solo si es el único texto antes de la primera etiqueta (top de la placa) y un año sin etiqueta solo si es el único candidato de 4 dígitos en toda la placa — la ambigüedad nunca se resuelve por adivinanza. La imagen y sus campos se guardan localmente (`src/evidence.js`) y se enlazan a la observación vía `evidenceIds`; los campos con respaldo fotográfico llegan a estado `Confirmado` de forma directa (evidencia visual), sin requerir la corroboración cruzada de dos perfiles que usa el resto del sistema — cambiar o borrar el valor revisado nunca reescribe la evidencia original almacenada.
+
+Modelo de evidencia preparado (EasyOCR — reconocedor `latin_g2` + detector `craft_mlt_25k`, ~15 MB + ~83 MB):
+
+```text
+C:\Users\kenet\.qvac\models\1bd09b23f28caa7e_latin_g2.gguf
+```
+
+Configúralo con `SITESIGNAL_PLATE_MODEL` (además de `SITESIGNAL_MODEL` y `SITESIGNAL_VOICE_MODEL`); sin esa variable la evidencia fotográfica queda deshabilitada (`/api/status` reporta `plate: unavailable`) pero el resto de la captura sigue intacto. `npm run qvac:prepare:photo` descarga el modelo; `npm run qvac:check:photo` corre una prueba de humo con QVAC real sobre las dos placas ficticias bundleadas (`test/fixtures/plate-sample-es.png`, `plate-sample-en.png`) y extrajo correctamente fabricante/modelo/serie/año en ambas.
+
 ## Próximo trabajo
 
-El siguiente ticket es **#12, dictado y transcripción local** (`11-voice-capture.md`).
-
-Después siguen, en orden:
-
-1. `12-photo-evidence.md` → ticket #13, evidencia ficticia por fotografía.
-2. `13-offline-delivery.md` → ticket #14, exportaciones y entrega offline.
+El siguiente ticket es **#14, exportaciones y entrega offline** (`13-offline-delivery.md`).
 
 Para cada ticket: implementa el comportamiento completo, ejecuta `npm run typecheck`, `npm test` y `git diff --check`, revisa especificación y estándares, crea un commit local y reinicia la aplicación con QVAC para la prueba visual.
 
@@ -85,16 +106,20 @@ Para cada ticket: implementa el comportamiento completo, ejecuta `npm run typech
 
 Repositorio: `C:\Users\kenet\Desktop\philips\RetoPhilips`
 
-Modelo preparado:
+Modelos preparados:
 
 ```text
 C:\Users\kenet\.qvac\models\6dea07e2f9342ff3_Qwen3-4B-Q4_K_M.gguf
+C:\Users\kenet\.qvac\models\8a583e4a84f1fe91_ggml-small-q8_0.bin
+C:\Users\kenet\.qvac\models\1bd09b23f28caa7e_latin_g2.gguf
 ```
 
 Arranque en PowerShell:
 
 ```powershell
 $env:SITESIGNAL_MODEL = 'C:\Users\kenet\.qvac\models\6dea07e2f9342ff3_Qwen3-4B-Q4_K_M.gguf'
+$env:SITESIGNAL_VOICE_MODEL = 'C:\Users\kenet\.qvac\models\8a583e4a84f1fe91_ggml-small-q8_0.bin'
+$env:SITESIGNAL_PLATE_MODEL = 'C:\Users\kenet\.qvac\models\1bd09b23f28caa7e_latin_g2.gguf'
 npm start
 ```
 
@@ -102,12 +127,15 @@ La aplicación escucha en `http://127.0.0.1:3210`. Si el puerto está ocupado, c
 
 Estado verificado al escribir este documento:
 
-- `npm test`: 61/61 pruebas aprobadas.
+- `npm test`: 73/73 pruebas aprobadas (incluye `test/photo-evidence.test.js`, 6 nuevas).
+- `npm run qvac:check:voice`: transcribió las dos muestras sintéticas con QVAC real (Whisper small Q8_0) correctamente, en español e inglés.
+- `npm run qvac:check:photo`: extrajo correctamente fabricante, modelo, número de serie y año de las dos placas ficticias bundleadas con QVAC real (EasyOCR local).
+- Verificación visual en navegador: la sección "Adjuntar evidencia fotográfica" se despliega en cada tarjeta de equipo del formulario de revisión, sube el archivo a `/api/evidence` y muestra el mensaje de error esperado cuando la imagen no es válida (probado intencionalmente con un archivo corrupto).
 - Validación manual con QVAC real sobre 50 relatos naturales (25 español, 25 inglés, sin datos "DemoCare" prearmados) confirmó hospital + al menos una modalidad en 50/50, ciudad en 47/50 y país en 41/50, estable en tres corridas independientes. Los huecos restantes son casos donde el propio relato no menciona ciudad/país o QVAC no lo recordó esa vez; el validador correctamente rechazó el único caso donde QVAC infirió un país ("Brazil" a partir de "São Paulo") sin que apareciera en el texto.
 - `npm run typecheck`: aprobado.
 - `git diff --check`: aprobado.
 - Rama `main`: verifica con `git status -sb` antes de sincronizar; no se hace `push` automáticamente.
-- La aplicación quedó ejecutándose con QVAC cargado en el puerto 3210, pero un nuevo chat debe comprobar el proceso porque la sesión de terminal puede no persistir.
+- La aplicación quedó ejecutándose con QVAC (texto, voz y evidencia fotográfica) cargado en el puerto 3210, pero un nuevo chat debe comprobar el proceso porque la sesión de terminal puede no persistir.
 - GitHub CLI fue instalado e inició sesión en otra terminal, aunque esta terminal no lo encuentra actualmente en `PATH`. Abrir una terminal nueva puede ser necesario.
 
 ## Riesgos y límites conocidos

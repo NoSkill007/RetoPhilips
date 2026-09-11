@@ -7,8 +7,8 @@ import { ZodError } from 'zod';
 import { observationApi } from './observations.js';
 import { RequestError } from './request-error.js';
 
-/** @param {{ dataDirectory: string, port: number, probeQvac: () => Promise<{state: string, message: string}>, qvacStatus?: () => {state: string, message: string}, extractText?: import('./observation-schema.js').TextExtractor, interpretQuery?: (question: string) => Promise<{fields: unknown, metadata: unknown}>, now?: () => Date, confirmationResolver?: (record: any) => string[] }} options */
-export async function startApplication({ dataDirectory, port, probeQvac, qvacStatus, extractText = async () => { throw new Error('QVAC no configurado'); }, interpretQuery, now = () => new Date(), confirmationResolver = () => [] }) {
+/** @param {{ dataDirectory: string, port: number, probeQvac: () => Promise<{state: string, message: string}>, qvacStatus?: () => {state: string, message: string}, extractText?: import('./observation-schema.js').TextExtractor, interpretQuery?: (question: string) => Promise<{fields: unknown, metadata: unknown}>, now?: () => Date, confirmationResolver?: (record: any) => string[], probeVoice?: () => Promise<{state: string, message: string}>, voiceStatus?: () => {state: string, message: string}, transcribeAudio?: (audio: Buffer, language: string) => Promise<{transcript: string, metadata: unknown}>, probePlate?: () => Promise<{state: string, message: string}>, plateStatus?: () => {state: string, message: string}, analyzeImage?: (image: Buffer) => Promise<{fields: unknown, ocrText: string, metadata: unknown}> }} options */
+export async function startApplication({ dataDirectory, port, probeQvac, qvacStatus, extractText = async () => { throw new Error('QVAC no configurado'); }, interpretQuery, now = () => new Date(), confirmationResolver = () => [], probeVoice = async () => ({ state: 'unavailable', message: 'Modelo de voz no configurado.' }), voiceStatus, transcribeAudio = async () => { throw new RequestError(503, 'La transcripción de voz local no está configurada.'); }, probePlate = async () => ({ state: 'unavailable', message: 'Modelo de evidencia fotográfica no configurado.' }), plateStatus, analyzeImage = async () => { throw new RequestError(503, 'El análisis local de evidencia fotográfica no está configurado.'); } }) {
   await mkdir(dataDirectory, { recursive: true });
   const db = new DatabaseSync(join(dataDirectory, 'sitesignal.db'));
   try {
@@ -17,10 +17,18 @@ export async function startApplication({ dataDirectory, port, probeQvac, qvacSta
     db.exec('UPDATE installation SET starts = starts + 1');
   } catch (error) { db.close(); throw error; }
   const installation = db.prepare('SELECT id, starts FROM installation').get();
-  const handleObservation = observationApi(db, extractText, now, confirmationResolver, interpretQuery);
+  const handleObservation = observationApi(db, extractText, now, confirmationResolver, interpretQuery, analyzeImage);
   let qvac = { state: 'degraded', message: 'Comprobando el modelo local…' };
   const probe = Promise.resolve().then(probeQvac).then(result => { qvac = result; }).catch(() => {
     qvac = { state: 'unavailable', message: 'No se pudo comprobar QVAC. Revisa la preparación y reinicia.' };
+  });
+  let voice = { state: 'degraded', message: 'Comprobando el modelo de voz local…' };
+  const voiceProbe = Promise.resolve().then(probeVoice).then(result => { voice = result; }).catch(() => {
+    voice = { state: 'unavailable', message: 'No se pudo comprobar el modelo de voz. Revisa la preparación y reinicia.' };
+  });
+  let plate = { state: 'degraded', message: 'Comprobando el modelo de evidencia fotográfica local…' };
+  const plateProbe = Promise.resolve().then(probePlate).then(result => { plate = result; }).catch(() => {
+    plate = { state: 'unavailable', message: 'No se pudo comprobar el modelo de evidencia fotográfica. Revisa la preparación y reinicia.' };
   });
   const assets = new Map([
     ['/', ['index.html', 'text/html; charset=utf-8']],
@@ -28,6 +36,8 @@ export async function startApplication({ dataDirectory, port, probeQvac, qvacSta
     ['/style.css', ['style.css', 'text/css; charset=utf-8']],
     ['/capture.js', ['capture.js', 'text/javascript; charset=utf-8']],
     ['/panorama.js', ['panorama.js', 'text/javascript; charset=utf-8']],
+    ['/voice.js', ['voice.js', 'text/javascript; charset=utf-8']],
+    ['/evidence.js', ['evidence.js', 'text/javascript; charset=utf-8']],
   ]);
   const server = createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
@@ -37,12 +47,46 @@ export async function startApplication({ dataDirectory, port, probeQvac, qvacSta
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({ api: { state: 'ready', message: 'API local disponible' }, database: {
         state: 'ready', message: 'SQLite local disponible', installationId: installation?.id, starts: installation?.starts,
-      }, qvac: qvacStatus?.() ?? qvac }));
+      }, qvac: qvacStatus?.() ?? qvac, voice: voiceStatus?.() ?? voice, plate: plateStatus?.() ?? plate }));
       return;
     }
     if (request.url?.startsWith('/api/')) {
       response.setHeader('Content-Type', 'application/json');
       try {
+        const pathname = new URL(request.url, 'http://sitesignal.local').pathname;
+        if (pathname === '/api/transcriptions' && request.method === 'POST') {
+          const origin = request.headers.origin;
+          if (origin && origin !== `http://${request.headers.host}`) throw new RequestError(403, 'Origen no permitido.');
+          if (!request.headers['content-type']?.startsWith('audio/')) throw new RequestError(415, 'Se requiere audio.');
+          const language = new URL(request.url, 'http://sitesignal.local').searchParams.get('language');
+          if (language !== 'es' && language !== 'en') throw new RequestError(400, 'Indica el idioma: es o en.');
+          const chunks = [];
+          let size = 0;
+          for await (const chunk of request) {
+            size += chunk.length;
+            if (size > 15 * 1024 * 1024) throw new RequestError(413, 'El audio es demasiado extenso.');
+            chunks.push(chunk);
+          }
+          if (!size) throw new RequestError(400, 'No se recibió audio.');
+          response.end(JSON.stringify(await transcribeAudio(Buffer.concat(chunks), language)));
+          return;
+        }
+        if (pathname === '/api/evidence' && request.method === 'POST') {
+          const origin = request.headers.origin;
+          if (origin && origin !== `http://${request.headers.host}`) throw new RequestError(403, 'Origen no permitido.');
+          const contentType = request.headers['content-type'] ?? '';
+          if (!contentType.startsWith('image/')) throw new RequestError(415, 'Se requiere una imagen.');
+          const chunks = [];
+          let size = 0;
+          for await (const chunk of request) {
+            size += chunk.length;
+            if (size > 8 * 1024 * 1024) throw new RequestError(413, 'La imagen es demasiado extensa.');
+            chunks.push(chunk);
+          }
+          if (!size) throw new RequestError(400, 'No se recibió imagen.');
+          response.end(JSON.stringify(await handleObservation('POST', '/api/evidence', { image: Buffer.concat(chunks), mimeType: contentType })));
+          return;
+        }
         let body;
         if (request.method === 'POST') {
           const origin = request.headers.origin;
@@ -86,5 +130,7 @@ export async function startApplication({ dataDirectory, port, probeQvac, qvacSta
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve(undefined)));
     db.close();
     await probe;
+    await voiceProbe;
+    await plateProbe;
   } };
 }

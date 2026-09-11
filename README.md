@@ -41,6 +41,10 @@ También puedes preguntar al panorama en español o inglés. QVAC interpreta ún
 
 Variables opcionales: `SITESIGNAL_PORT` (1–65535), `SITESIGNAL_DATA` (directorio de almacenamiento). `SITESIGNAL_MODEL` debe configurarse en cada terminal nueva o persistirse mediante la configuración de entorno de Windows. Un modelo ausente permite abrir la interfaz con instrucciones de recuperación; un puerto ocupado o almacenamiento sin permisos impide arrancar y produce un mensaje en terminal. No se modifica ni elimina la base existente.
 
+Dictado local: además de escribir, puedes grabar la observación desde el navegador (sección "Dictar la observación"), elegir español o inglés, y transcribirla en este equipo con QVAC (Whisper small multilingüe, con decodificación determinista: `temperature: 0`, `strategy: greedy`); ningún audio ni transcripción sale a un servicio en la nube. La transcripción llena el mismo cuadro de texto y sigue el mismo flujo de revisión, validación y guardado que la captura escrita. Requiere `npm run qvac:prepare:voice` (descarga `ggml-small-q8_0.bin`, ~264 MB) y configurar `SITESIGNAL_VOICE_MODEL` con la ruta mostrada. Sin esa variable, el dictado queda deshabilitado pero la captura escrita sigue funcionando con normalidad.
+
+Evidencia fotográfica local: cada tarjeta de equipo del formulario de revisión permite adjuntar una foto de una placa o etiqueta ficticia. La imagen se procesa en este equipo con OCR local de QVAC (EasyOCR); un analizador determinista (sin LLM) busca las etiquetas conocidas de fabricante, modelo, número de serie y fecha de fabricación/instalación en el texto detectado y solo confirma un campo cuando el propio texto de la placa lo respalda. La imagen y los campos extraídos se guardan localmente y quedan enlazados a la observación; los campos con respaldo fotográfico llegan a estado Confirmado de forma directa. Requiere `npm run qvac:prepare:photo` (descarga el modelo de reconocimiento/detección de texto, ~98 MB en total) y configurar `SITESIGNAL_PLATE_MODEL` con la ruta mostrada. Sin esa variable, la evidencia fotográfica queda deshabilitada pero el resto de la captura sigue funcionando con normalidad.
+
 ## Validación
 
 ```powershell
@@ -49,6 +53,10 @@ npm test
 ```
 
 Las pruebas consultan la API HTTP con SQLite temporal real y un adaptador de texto determinista. Para comprobar la extracción real en español e inglés, configura `SITESIGNAL_MODEL` y ejecuta `npm run qvac:check:text`. Las respuestas varían según el modelo y siempre pasan por una revisión humana antes de guardarse. La prueba completa con la red deshabilitada corresponde a la entrega final.
+
+Para comprobar la transcripción de voz real, configura `SITESIGNAL_VOICE_MODEL` y ejecuta `npm run qvac:check:voice`; transcribe las dos muestras sintéticas incluidas en `test/fixtures/` (español e inglés, generadas localmente con la TTS de QVAC, sin voces ni datos reales).
+
+Para comprobar la evidencia fotográfica real, configura `SITESIGNAL_PLATE_MODEL` y ejecuta `npm run qvac:check:photo`; analiza dos placas ficticias sintéticas incluidas en `test/fixtures/` (español e inglés) y muestra los campos extraídos.
 
 ## Origen
 

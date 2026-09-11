@@ -1,3 +1,4 @@
+import { uploadEvidence } from './evidence.js';
 /** @param {string} id */
 function el(id) { const result = document.getElementById(id); if (!result) throw new Error(id); return result; }
 /** @param {string} id */
@@ -23,6 +24,9 @@ function node(tag, text) { const result = document.createElement(tag); result.te
 let draft = null;
 /** @type {any[]} */
 let hospitals = [];
+/** Evidence photos attached to the equipment cards of the draft currently under review; sent as
+ * `evidenceIds` when the observation is saved. Reset whenever a fresh draft replaces the current one. */
+let attachedEvidenceIds = /** @type {string[]} */ ([]);
 const modalities = ['Resonancia magnética', 'Tomografía computarizada', 'Ultrasonido', 'Monitoreo de pacientes', 'Rayos X', 'Sistema intervencionista', 'Mamografía', 'Medicina nuclear / PET', 'Electrocardiografía', 'Ventilación mecánica', 'Desfibrilador', 'Endoscopia', 'Otro'];
 const equipmentFields = [ ['modality', 'Modalidad'], ['quantity', 'Cantidad'], ['manufacturer', 'Fabricante'], ['model', 'Modelo'], ['serial', 'Número de serie'], ['age', 'Antigüedad reportada (años)'] ];
 
@@ -66,6 +70,34 @@ function addCard(equipment) {
       input.value = String(equipment[key] ?? ''); wrapper.append(input); card.append(wrapper);
     } else card.append(inputField(key, label, equipment[key] ?? null));
   }
+  const evidenceForm = document.createElement('details'); evidenceForm.className = 'evidence-form';
+  evidenceForm.append(node('summary', 'Adjuntar evidencia fotográfica (placa o etiqueta ficticia)'));
+  const evidenceInput = document.createElement('input'); evidenceInput.type = 'file'; evidenceInput.accept = 'image/*';
+  evidenceInput.setAttribute('capture', 'environment');
+  const evidenceButton = document.createElement('button'); evidenceButton.type = 'button'; evidenceButton.textContent = 'Analizar foto con QVAC';
+  const evidenceFeedback = document.createElement('p'); evidenceFeedback.className = 'hint';
+  evidenceButton.addEventListener('click', async () => {
+    const file = evidenceInput.files?.[0];
+    if (!file) { evidenceFeedback.textContent = 'Selecciona una foto primero.'; return; }
+    evidenceButton.disabled = true; evidenceFeedback.textContent = 'QVAC está leyendo la placa en esta computadora…';
+    try {
+      const result = await uploadEvidence(file);
+      const { manufacturer, model, serial, year } = result.fields;
+      /** @param {string} name @param {string | number | null} value */
+      const fill = (name, value) => {
+        if (value === null) return;
+        const input = card.querySelector(`[name="${name}"]`);
+        if (input instanceof HTMLInputElement) input.value = String(value);
+      };
+      fill('manufacturer', manufacturer); fill('model', model); fill('serial', serial);
+      if (year !== null && draft?.capturedAt) fill('age', new Date(draft.capturedAt).getFullYear() - year);
+      attachedEvidenceIds = [...attachedEvidenceIds, result.evidenceId];
+      const found = [manufacturer && 'fabricante', model && 'modelo', serial && 'número de serie', year && 'año'].filter(Boolean);
+      evidenceFeedback.textContent = found.length ? `Detectado y aplicado: ${found.join(', ')}. Texto leído: “${result.ocrText}”.` : `No se detectó ningún campo con respaldo suficiente. Texto leído: “${result.ocrText || 'ninguno'}”.`;
+    } catch (error) { evidenceFeedback.textContent = error instanceof Error ? error.message : 'No se pudo analizar la foto.'; }
+    finally { evidenceButton.disabled = false; }
+  });
+  evidenceForm.append(evidenceInput, evidenceButton, evidenceFeedback); card.append(evidenceForm);
   const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Quitar tarjeta';
   remove.addEventListener('click', () => card.remove()); card.append(remove);
   el('equipment-cards').append(card);
@@ -179,7 +211,7 @@ form('capture-form').addEventListener('submit', async event => {
   const input = el('observation'); if (!(input instanceof HTMLTextAreaElement)) return;
   if (!select('profile').value) { feedback('Crea y selecciona un perfil de colaborador.', true); return; }
   const button = el('extract'); if (!(button instanceof HTMLButtonElement)) return;
-  button.disabled = true; input.readOnly = true; el('review').hidden = true; draft = null;
+  button.disabled = true; input.readOnly = true; el('review').hidden = true; draft = null; attachedEvidenceIds = [];
   feedback('QVAC está leyendo tu observación en esta computadora…');
   try {
     draft = await api('/api/drafts', { text: input.value });
@@ -188,7 +220,7 @@ form('capture-form').addEventListener('submit', async event => {
   } catch (error) { report(error); }
   finally { button.disabled = false; input.readOnly = false; }
 });
-el('observation').addEventListener('input', () => { if (draft) { draft = null; el('review').hidden = true; feedback('El texto cambió. Vuelve a extraer para revisar la nueva versión.'); } });
+el('observation').addEventListener('input', () => { if (draft) { draft = null; attachedEvidenceIds = []; el('review').hidden = true; feedback('El texto cambió. Vuelve a extraer para revisar la nueva versión.'); } });
 el('add-equipment').addEventListener('click', () => { if (el('equipment-cards').children.length < 20) addCard({}); });
 form('review-form').addEventListener('submit', async event => {
   event.preventDefault(); if (!draft) return;
@@ -200,7 +232,8 @@ form('review-form').addEventListener('submit', async event => {
       /** @type {Record<string, string | number | null>} */
       const equipment = {};
       for (const input of card.querySelectorAll('input, select')) {
-        if (input instanceof HTMLInputElement || input instanceof HTMLSelectElement) equipment[input.name] = input.value.trim() === '' ? null : ['quantity', 'age'].includes(input.name) ? Number(input.value) : input.value.trim();
+        // The evidence-photo file input has no name — it isn't an equipment field and must not leak in.
+        if ((input instanceof HTMLInputElement || input instanceof HTMLSelectElement) && input.name) equipment[input.name] = input.value.trim() === '' ? null : ['quantity', 'age'].includes(input.name) ? Number(input.value) : input.value.trim();
       }
       return equipment;
     }) };
@@ -208,8 +241,9 @@ form('review-form').addEventListener('submit', async event => {
   try {
     const saved = await api('/api/observations', { draftId: draft.id, reviewed,
       hospitalId: select('hospital-choice').value === 'new' ? null : select('hospital-choice').value,
-      splitGroupId: select('split-group-choice').value || null });
-    draft = null; el('review').hidden = true; form('capture-form').reset();
+      splitGroupId: select('split-group-choice').value || null,
+      evidenceIds: attachedEvidenceIds.length ? attachedEvidenceIds : undefined });
+    draft = null; attachedEvidenceIds = []; el('review').hidden = true; form('capture-form').reset();
     await loadHospitals(); await showHospital(saved.hospitalId); window.dispatchEvent(new CustomEvent('sitesignal:panorama-refresh')); feedback('Observación guardada con su texto original y procedencia.');
     el('hospital-view').scrollIntoView({ behavior: 'smooth' });
   } catch (error) { report(error); }

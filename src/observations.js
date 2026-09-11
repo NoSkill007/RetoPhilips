@@ -7,6 +7,7 @@ import { RequestError } from './request-error.js';
 import { regionalPanorama } from './regional-panorama.js';
 import { naturalQuery } from './natural-query.js';
 import { opportunities, opportunityReviewSchema } from './opportunities.js';
+import { evidenceStore } from './evidence.js';
 
 const followUpAnswerSchema = z.object({ answer: z.union([z.string().trim().min(1).max(300), z.number(), z.null()]) }).strict();
 const duplicateDecisionSchema = z.object({ decision: z.enum(['keep-separate', 'consolidate']) }).strict();
@@ -15,8 +16,8 @@ const correctionSchema = z.object({ field: z.enum(['modality', 'quantity', 'manu
 const conflictResolutionSchema = z.object({ value: z.union([z.string().trim().min(1).max(300), z.number()]),
   explanation: z.string().trim().min(3).max(500) }).strict();
 
-/** @param {import('node:sqlite').DatabaseSync} db @param {import('./observation-schema.js').TextExtractor} extractText @param {() => Date} now @param {(record: any) => string[]} confirmationResolver @param {(question: string) => Promise<{fields: unknown, metadata: unknown}>} interpretQuery */
-export function observationApi(db, extractText, now = () => new Date(), confirmationResolver = () => [], interpretQuery = async () => { throw new RequestError(503, 'El intérprete local de consultas no está disponible.'); }) {
+/** @param {import('node:sqlite').DatabaseSync} db @param {import('./observation-schema.js').TextExtractor} extractText @param {() => Date} now @param {(record: any) => string[]} confirmationResolver @param {(question: string) => Promise<{fields: unknown, metadata: unknown}>} interpretQuery @param {(image: Buffer) => Promise<{fields: unknown, ocrText: string, metadata: unknown}>} analyzeImage */
+export function observationApi(db, extractText, now = () => new Date(), confirmationResolver = () => [], interpretQuery = async () => { throw new RequestError(503, 'El intérprete local de consultas no está disponible.'); }, analyzeImage = async () => { throw new RequestError(503, 'El análisis local de evidencia fotográfica no está configurado.'); }) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -31,6 +32,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
   const regional = regionalPanorama(db, now);
   const query = naturalQuery(regional, interpretQuery);
   const opportunity = opportunities(db, now);
+  const evidence = evidenceStore(db);
   /** @param {string} hospitalId @param {any[]} items @param {any[]} conflicts @param {any[]} observationRows */
   function opportunitiesForHospital(hospitalId, items, conflicts, observationRows) {
     return items.filter(item => item.kind === 'individual' || item.kind === 'consolidated').map(item => {
@@ -65,13 +67,20 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       ? { kind: 'qvac', metadata: observation.inference, attempts: 1, retryCorrected: false, validationIssues: [] }
       : { kind: 'manual', attempts: 2, validationIssues: [] });
     const current = { ...observation, provenance };
-    const confirmedFields = [...new Set([...confirmationResolver(current), ...base.confirmedFieldsForObservation(current)])];
+    const confirmedFields = [...new Set([...confirmationResolver(current), ...base.confirmedFieldsForObservation(current), ...evidence.confirmedFieldsForObservation(current)])];
     return { ...current, assessment: assessObservation({ ...current, confirmedFields }, now()) };
   }
   /** @param {string} method @param {string} path @param {unknown} body */
   return async function handle(method, path, body) {
     if (new URL(path, 'http://sitesignal.local').pathname === '/api/panorama' || path === '/api/demo/reset') return regional.handle(method, path);
     if (path === '/api/natural-query' && method === 'POST') return query(body);
+    if (path === '/api/evidence' && method === 'POST' && body && typeof body === 'object' && 'image' in body) {
+      const { image, mimeType } = /** @type {{image: Buffer, mimeType: string}} */ (body);
+      const result = await analyzeImage(image);
+      const fields = /** @type {{manufacturer: string | null, model: string | null, serial: string | null, year: number | null}} */ (result.fields);
+      const record = evidence.store(null, mimeType, image, fields, result.ocrText, now().toISOString());
+      return { evidenceId: record.id, fields: result.fields, ocrText: result.ocrText, metadata: result.metadata };
+    }
     if (path === '/api/profiles' && method === 'GET') return {
       profiles: db.prepare('SELECT * FROM profiles ORDER BY name').all(),
       activeProfileId: db.prepare("SELECT value FROM preferences WHERE key = 'activeProfile'").get()?.value ?? null,
@@ -251,7 +260,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
         }
         const observation = { id: randomUUID(), hospitalId: hospital.id, originalText: draft.originalText,
           reviewed: { ...input.reviewed, hospital: hospital.name, client: hospital.client, city: hospital.city ?? null, country: hospital.country ?? null }, extracted: draft.extracted,
-          profile: draft.profile, provenance: draft.provenance,
+          profile: draft.profile, provenance: draft.provenance, evidenceIds: input.evidenceIds ?? [],
           capturedAt: draft.capturedAt, createdAt: now().toISOString() };
         db.prepare('INSERT INTO observations VALUES (?, ?, ?, ?)').run(observation.id, input.draftId, observation.hospitalId, JSON.stringify(observation));
         if (input.splitGroupId) base.splitFromObservation(input.splitGroupId, observation);

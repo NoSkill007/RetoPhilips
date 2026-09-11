@@ -9,7 +9,11 @@
     "typecheck": "tsc --noEmit",
     "qvac:test": "node quickstart.js",
     "qvac:prepare:text": "node scripts/prepare-text-model.js",
-    "qvac:check:text": "node scripts/check-text-qvac.js"
+    "qvac:check:text": "node scripts/check-text-qvac.js",
+    "qvac:prepare:voice": "node scripts/prepare-voice-model.js",
+    "qvac:check:voice": "node scripts/check-voice-qvac.js",
+    "qvac:prepare:photo": "node scripts/prepare-photo-model.js",
+    "qvac:check:photo": "node scripts/check-photo-qvac.js"
   },
   "dependencies": {
     "@qvac/sdk": "^0.19.0",

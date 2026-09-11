@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="es">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SiteSignal · Observaciones</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script type="module" src="/capture.js"></script><script type="module" src="/panorama.js"></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SiteSignal · Observaciones</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script type="module" src="/capture.js"></script><script type="module" src="/voice.js"></script><script type="module" src="/panorama.js"></script></head>
 <body><header><a href="/" class="brand"><span class="mark">S</span> SiteSignal</a><span class="local">En tu computadora</span></header>
 <main><p class="eyebrow">INTELIGENCIA DE BASE INSTALADA</p><h1>Todo empieza con una observación.</h1><p class="intro">Un espacio local para convertir el conocimiento de las visitas en información útil sobre los equipos de cada hospital.</p>
 <nav aria-label="Secciones"><a href="#panorama">Panorama regional</a><a href="#capture">Nueva observación</a><a href="#hospitals">Clientes y hospitales</a><a href="#status-heading">Entorno local</a></nav>
@@ -16,6 +16,10 @@
 <section id="capture" aria-labelledby="capture-title"><p class="eyebrow">01 · CAPTURAR</p><h2 id="capture-title">Registrar una visita</h2>
 <div class="profile-box"><label for="profile">Perfil de colaborador activo</label><select id="profile"><option value="">Selecciona un perfil</option></select>
 <details><summary>Crear perfil de colaborador</summary><form id="profile-form" class="form-grid"><label>Nombre<input name="name" required maxlength="80" placeholder="Ej. Ana Demo"></label><label>Rol<select name="role"><option>Ingeniero de servicio</option><option>Vendedor</option><option>Especialista</option></select></label><button type="submit">Crear y seleccionar</button></form></details></div>
+<div id="voice-capture" class="voice-capture"><h3>Dictar la observación</h3><p class="hint">Graba tu relato y transcríbelo en este equipo con QVAC; nada de audio ni de texto sale a la nube. Revisa la transcripción antes de extraer.</p>
+<label for="voice-language">Idioma del dictado</label><select id="voice-language"><option value="es">Español</option><option value="en">English</option></select>
+<div class="voice-actions"><button type="button" id="voice-record">Grabar</button><button type="button" id="voice-stop" disabled>Detener</button><button type="button" id="voice-transcribe" disabled>Transcribir con QVAC</button><button type="button" id="voice-discard" disabled>Descartar grabación</button></div>
+<audio id="voice-playback" controls hidden></audio><p id="voice-feedback" class="hint" aria-live="polite"></p></div>
 <form id="capture-form"><label for="observation">¿Qué observaste durante la visita?</label><p class="hint">Escribe en español o inglés. Incluye solo datos ficticios; deja fuera lo que no conozcas.</p><textarea id="observation" required minlength="5" maxlength="8000" rows="5" placeholder="Visité Hospital Aurora del cliente Red Horizonte, área Norte. Vi dos tomógrafos; parecen tener ocho años."></textarea><button type="submit" class="primary" id="extract">Extraer con QVAC</button></form>
 </section>
 <section id="review" hidden aria-labelledby="review-title"><p class="eyebrow">02 · REVISAR</p><h2 id="review-title">Revisa antes de guardar</h2><p id="draft-author"></p><p class="hint">Corrige la interpretación. Los campos vacíos se guardan como desconocidos. Revisar un dato no lo convierte en un hecho confirmado.</p>
