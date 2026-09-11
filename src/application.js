@@ -45,7 +45,10 @@ export async function startApplication({ dataDirectory, port, probeQvac, qvacSta
   const server = createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
-    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: https://*.tile.openstreetmap.org; frame-ancestors 'none'");
+    // media-src needs an explicit "blob:" — 'self' does not cover the blob: scheme per the CSP spec,
+    // and without media-src the browser falls back to default-src, silently rejecting the recorded
+    // WAV blob the dictation playback element (#voice-playback) is given after stopping a recording.
+    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: https://*.tile.openstreetmap.org; media-src 'self' blob:; frame-ancestors 'none'");
     if (request.url === '/api/status' && request.method === 'GET') {
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({ api: { state: 'ready', message: 'API local disponible' }, database: {

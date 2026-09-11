@@ -118,6 +118,9 @@ el('voice-transcribe').addEventListener('click', async () => {
     // capture.js resets it back to "text" the moment the collaborator actually edits the box by hand.
     observation.dataset.source = 'voice';
     observation.dispatchEvent(new Event('input', { bubbles: true }));
+    // Switches the wizard back to the "Escribir" tab so the collaborator lands directly on the
+    // transcript to correct it, instead of staying on "Dictar" and having to find it themselves.
+    window.dispatchEvent(new CustomEvent('sitesignal:capture-tab', { detail: 'text' }));
     observation.scrollIntoView({ behavior: 'smooth', block: 'center' });
     feedback(`Transcripción lista (${result.metadata.engine} · ${result.metadata.model} · ${(result.metadata.durationMs / 1000).toFixed(1)} s). Corrígela en el cuadro de texto antes de extraer.`);
   } catch (error) {

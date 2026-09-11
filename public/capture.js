@@ -173,8 +173,16 @@ function renderReview() {
   const comments = el('observation-comments'); if (comments instanceof HTMLTextAreaElement) comments.value = draft.reviewed.comments ?? '';
   const target = select('hospital-choice'); target.replaceChildren(); option(target, '', 'Selecciona un destino');
   option(target, 'new', 'Crear un hospital con los datos revisados');
-  for (const hospital of hospitals) option(target, hospital.id, `${draft.candidates.some(/** @param {{id: string}} c */ c => c.id === hospital.id) ? 'Posible coincidencia · ' : ''}${hospital.name} · ${hospital.client ?? 'Cliente desconocido'}`);
-  target.value = draft.candidates.length ? '' : 'new';
+  for (const hospital of hospitals) {
+    const prefix = hospital.id === draft.exactMatchId ? 'Coincidencia exacta · ' : draft.candidates.some(/** @param {{id: string}} c */ c => c.id === hospital.id) ? 'Posible coincidencia · ' : '';
+    option(target, hospital.id, `${prefix}${hospital.name} · ${hospital.client ?? 'Cliente desconocido'}`);
+  }
+  // A "possible match" (substring on the name alone) still needs a human pick — but when the name,
+  // client, city and country all already agree with one existing hospital (the same exact-match rule
+  // that blocks creating a duplicate at save time), there is nothing left to decide: select it outright
+  // so the collaborator isn't asked to confirm what the data has already settled.
+  target.value = draft.exactMatchId ?? (draft.candidates.length ? '' : 'new');
+  if (draft.exactMatchId) target.dispatchEvent(new Event('change'));
   const preferredHospital = localStorage.getItem('sitesignal:targetHospital');
   if (preferredHospital && hospitals.some(hospital => hospital.id === preferredHospital)) { target.value = preferredHospital; localStorage.removeItem('sitesignal:targetHospital'); target.dispatchEvent(new Event('change')); }
   renderSplitGroups(null);
@@ -346,7 +354,10 @@ async function showHospital(id) {
   if (!hospital.installedBase.items.length) base.append(node('p', 'Todavía no hay equipos representados.'));
   for (const item of hospital.installedBase.items) {
     const card = document.createElement('article'); card.className = `installed-item ${item.kind}`;
-    const kindLabel = item.kind === 'group' ? `GRUPO DE EQUIPOS · ${item.quantity ?? 'cantidad desconocida'}` : item.kind === 'consolidated' ? 'EQUIPO CONSOLIDADO' : 'EQUIPO INDIVIDUAL';
+    // The overline badge names the actual modality instead of a generic "GRUPO DE EQUIPOS" label —
+    // "CANTIDAD DE TOMOGRAFÍA COMPUTARIZADA · 2" reads immediately, unlike a bare count that only
+    // makes sense once you've also read the h4 right below it.
+    const kindLabel = item.kind === 'group' ? `CANTIDAD DE ${(item.modality ?? 'EQUIPOS').toUpperCase()} · ${item.quantity ?? 'cantidad desconocida'}` : item.kind === 'consolidated' ? 'EQUIPO CONSOLIDADO' : 'EQUIPO INDIVIDUAL';
     card.append(node('p', kindLabel));
     card.append(node('h4', item.modality ?? 'Modalidad desconocida'));
     const details = document.createElement('dl'); details.className = 'equipment-summary';

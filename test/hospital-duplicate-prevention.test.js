@@ -77,6 +77,45 @@ test('el mismo nombre de hospital bajo un cliente distinto no se bloquea', async
   } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
+test('un borrador cuyo nombre, cliente, ciudad y país ya coinciden con un hospital existente trae exactMatchId', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sitesignal-hospital-exact-match-'));
+  const context = await setup(directory);
+  const fields = { client: 'Red Ficticia', hospital: 'Hospital Único Ficticio', area: null, city: 'Ciudad Ficticia', country: 'Panamá', equipment: [
+    { modality: 'tomógrafo', quantity: 'uno', manufacturer: 'DemoMed', model: 'X1', serial: 'SN-100', age: 'ocho años' },
+  ] };
+  try {
+    const draft1 = await context.draftFor(fields, 'Visité Hospital Único Ficticio de Red Ficticia en Ciudad Ficticia, Panamá. Vi un tomógrafo DemoMed X1, número de serie SN-100, ocho años.');
+    assert.equal(draft1.exactMatchId, null, 'todavía no existe ningún hospital con ese nombre');
+    const saved1 = await context.ok('/api/observations', { draftId: draft1.id, reviewed: draft1.reviewed, hospitalId: null });
+
+    const draft2 = await context.draftFor(fields, 'Otra visita: Hospital Único Ficticio de Red Ficticia en Ciudad Ficticia, Panamá. Vi un tomógrafo DemoMed X1, número de serie SN-100, ocho años.');
+    assert.equal(draft2.exactMatchId, saved1.hospitalId, 'el mismo nombre, cliente, ciudad y país ya identifican el hospital existente');
+    // saving straight through with that hospital selected (what the review screen now does by itself)
+    // succeeds without the 409 a mismatched or omitted destination would trigger.
+    const saved2 = await context.ok('/api/observations', { draftId: draft2.id, reviewed: draft2.reviewed, hospitalId: draft2.exactMatchId });
+    assert.equal(saved2.hospitalId, saved1.hospitalId);
+  } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('un candidato por nombre parcial no cuenta como coincidencia exacta', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sitesignal-hospital-partial-match-'));
+  const context = await setup(directory);
+  try {
+    const draft1 = await context.draftFor({ client: 'Red Ficticia', hospital: 'Hospital Norte Ficticio', area: null, equipment: [
+      { modality: 'tomógrafo', quantity: 'uno', manufacturer: 'DemoMed', model: 'X1', serial: 'SN-N1', age: null },
+    ] }, 'Visité Hospital Norte Ficticio de Red Ficticia. Vi un tomógrafo DemoMed X1, número de serie SN-N1.');
+    await context.ok('/api/observations', { draftId: draft1.id, reviewed: draft1.reviewed, hospitalId: null });
+
+    // "Hospital Norte" is a substring of "Hospital Norte Ficticio" — a plausible candidate to suggest,
+    // but genuinely a different name, so it must stay a manual choice rather than auto-selecting.
+    const draft2 = await context.draftFor({ client: 'Red Ficticia', hospital: 'Hospital Norte', area: null, equipment: [
+      { modality: 'tomógrafo', quantity: 'uno', manufacturer: 'DemoMed', model: 'X2', serial: 'SN-N2', age: null },
+    ] }, 'Visité Hospital Norte de Red Ficticia. Vi un tomógrafo DemoMed X2, número de serie SN-N2.');
+    assert.equal(draft2.exactMatchId, null);
+    assert.ok(draft2.candidates.length >= 1, 'debe seguir sugiriéndose como posible coincidencia');
+  } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test('el mismo nombre de hospital en una ciudad distinta no se bloquea', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'sitesignal-hospital-dup-city-'));
   const context = await setup(directory);

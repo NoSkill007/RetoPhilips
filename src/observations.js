@@ -101,13 +101,32 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
     if (!row) throw new RequestError(404, 'El perfil no existe. Selecciona un perfil de colaborador.');
     return row;
   }
+  /** A field only counts as a mismatch when BOTH sides actually have a value and they disagree —
+   * an unknown field on either side never blocks a match, the same rule the duplicate-hospital 409
+   * check below already applies at save time. @param {unknown} a @param {unknown} b */
+  function compatible(a, b) { return !a || !b || normalize(String(a)) === normalize(String(b)); }
+  /** Finds the one existing hospital whose name, client, city and country are all compatible with the
+   * reviewed draft — the same exact-match rule the save endpoint uses to refuse a second, duplicate
+   * hospital record. Reused here so the review screen can pick that hospital as the destination by
+   * itself instead of leaving the collaborator to notice and select it manually.
+   * @param {{hospital: string | null, client?: string | null, city?: string | null, country?: string | null}} reviewed */
+  function findExactHospitalMatch(reviewed) {
+    if (!reviewed.hospital) return null;
+    const normalizedName = normalize(reviewed.hospital);
+    return /** @type {any[]} */ (db.prepare('SELECT * FROM hospitals').all()).find(row =>
+      normalize(String(row.name)) === normalizedName
+      && compatible(row.client, reviewed.client)
+      && compatible(row.city, reviewed.city)
+      && compatible(row.country, reviewed.country)) ?? null;
+  }
   /** @param {any} draft */
   function presentDraft(draft) {
     const hospitals = db.prepare('SELECT * FROM hospitals ORDER BY name').all();
     const needle = normalize(draft.reviewed.hospital ?? '');
     const candidates = hospitals.filter(h => needle && (normalize(String(h.name)).includes(needle) || needle.includes(normalize(String(h.name)))));
+    const exactMatch = findExactHospitalMatch(draft.reviewed);
     const followUp = nextFollowUp(draft);
-    return { ...draft, candidates, followUp, followUpProgress: { answered: draft.followUpHistory.length, limit: 3 },
+    return { ...draft, candidates, exactMatchId: exactMatch?.id ?? null, followUp, followUpProgress: { answered: draft.followUpHistory.length, limit: 3 },
       assessment: assessObservation({ ...draft, confirmedFields: confirmationResolver(draft) }, now()) };
   }
   /** @param {any} observation */
@@ -313,14 +332,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       // explicit choice the UI already offers, the same way equipment duplicates stay pending for a human
       // decision instead of being merged or duplicated automatically.
       if (!hospital && input.reviewed.hospital) {
-        const normalizedName = normalize(input.reviewed.hospital);
-        /** @param {unknown} a @param {unknown} b */
-        const compatible = (a, b) => !a || !b || normalize(String(a)) === normalize(String(b));
-        const existingMatch = /** @type {any[]} */ (db.prepare('SELECT * FROM hospitals').all()).find(row =>
-          normalize(String(row.name)) === normalizedName
-          && compatible(row.client, input.reviewed.client)
-          && compatible(row.city, input.reviewed.city)
-          && compatible(row.country, input.reviewed.country));
+        const existingMatch = findExactHospitalMatch(input.reviewed);
         if (existingMatch) throw new RequestError(409, `Ya existe un hospital llamado "${existingMatch.name}"${existingMatch.client ? ` (cliente: ${existingMatch.client})` : ''}. Selecciónalo en "Destino de la observación" en vez de crear uno nuevo, para no duplicar la base instalada.`);
       }
       db.exec('BEGIN');

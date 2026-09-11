@@ -81,11 +81,15 @@ for (const button of document.querySelectorAll('[data-hospital-filter]')) button
   for (const item of document.querySelectorAll('[data-hospital-filter]')) item.classList.toggle('active', item === button);
   renderDirectory();
 });
-for (const button of document.querySelectorAll('[data-capture-tab]')) button.addEventListener('click', () => {
-  const tab = button.getAttribute('data-capture-tab');
-  for (const item of document.querySelectorAll('[data-capture-tab]')) { item.classList.toggle('active', item === button); item.setAttribute('aria-selected', String(item === button)); item.setAttribute('tabindex', item === button ? '0' : '-1'); }
+/** @param {string} tab */
+function activateCaptureTab(tab) {
+  for (const item of document.querySelectorAll('[data-capture-tab]')) { const active = item.getAttribute('data-capture-tab') === tab; item.classList.toggle('active', active); item.setAttribute('aria-selected', String(active)); item.setAttribute('tabindex', active ? '0' : '-1'); }
   for (const panel of document.querySelectorAll('[data-capture-panel]')) if (panel instanceof HTMLElement) panel.hidden = panel.getAttribute('data-capture-panel') !== tab;
-});
+}
+for (const button of document.querySelectorAll('[data-capture-tab]')) button.addEventListener('click', () => activateCaptureTab(button.getAttribute('data-capture-tab') ?? 'text'));
+// voice.js dispatches this after a successful transcription so the collaborator lands back on the
+// text box that now holds the transcript — the same place they'd correct it by hand.
+window.addEventListener('sitesignal:capture-tab', event => { if (event instanceof CustomEvent && typeof event.detail === 'string') activateCaptureTab(event.detail); });
 const captureTabs = [...document.querySelectorAll('[data-capture-tab]')];
 for (const [index, button] of captureTabs.entries()) button.addEventListener('keydown', event => { if (!(event instanceof KeyboardEvent) || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); const direction = event.key === 'ArrowRight' ? 1 : -1; const enabled = captureTabs.filter(item => !/** @type {HTMLButtonElement} */ (item).disabled); const current = enabled.indexOf(button); const next = /** @type {HTMLElement} */ (enabled[(current + direction + enabled.length) % enabled.length]); next?.focus(); next?.click(); });
 const observation = /** @type {HTMLTextAreaElement} */ (el('observation'));

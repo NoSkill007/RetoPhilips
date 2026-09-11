@@ -70,6 +70,17 @@ const prompts = {
   quantity: '¿Cuántos equipos observaste?', manufacturer: '¿Conoces el fabricante?',
   model: '¿Conoces el modelo?', age: '¿Cuál es la antigüedad aproximada en años?',
 };
+/** Once the modality of an equipment group is known, the question names it directly ("¿Cuántos
+ * equipos de Tomografía computarizada observaste?") instead of a generic count that only makes
+ * sense next to an ordinal ("Equipo 2") — this is the same equipment the reviewer is already
+ * looking at, so naming it is clearer than numbering it.
+ * @type {Record<string, (modality: string) => string>} */
+const promptsByModality = {
+  quantity: modality => `¿Cuántos equipos de ${modality} observaste?`,
+  manufacturer: modality => `¿Conoces el fabricante del equipo de ${modality}?`,
+  model: modality => `¿Conoces el modelo del equipo de ${modality}?`,
+  age: modality => `¿Cuál es la antigüedad aproximada en años del equipo de ${modality}?`,
+};
 /** @param {any} draft */
 export function nextFollowUp(draft) {
   const history = draft.followUpHistory ?? [];
@@ -79,10 +90,14 @@ export function nextFollowUp(draft) {
   for (const field of ['modality', 'quantity', 'manufacturer', 'model', 'age']) {
     for (let index = 0; index < draft.reviewed.equipment.length; index += 1) {
       const key = `equipment.${index}.${field}`;
-      if (draft.reviewed.equipment[index][field] === null && !answered.has(key)) return {
-        key, field, equipmentIndex: index, kind: field === 'modality' ? 'modality' : ['quantity', 'age'].includes(field) ? 'number' : 'text',
-        prompt: draft.reviewed.equipment.length > 1 ? `${prompts[field]} Equipo ${index + 1}.` : prompts[field],
-      };
+      if (draft.reviewed.equipment[index][field] === null && !answered.has(key)) {
+        const modality = draft.reviewed.equipment[index].modality;
+        const dynamicPrompt = field !== 'modality' && modality ? promptsByModality[field]?.(modality) : null;
+        return {
+          key, field, equipmentIndex: index, kind: field === 'modality' ? 'modality' : ['quantity', 'age'].includes(field) ? 'number' : 'text',
+          prompt: dynamicPrompt ?? (draft.reviewed.equipment.length > 1 ? `${prompts[field]} Equipo ${index + 1}.` : prompts[field]),
+        };
+      }
     }
   }
   return null;
