@@ -69,7 +69,7 @@ Organización de salud que puede operar uno o varios hospitales.
 _Avoid_: Hospital, sede
 
 **Hospital**:
-Sede física perteneciente a un cliente, que puede contener un área o edificio opcional para ubicar equipos con mayor precisión.
+Sede física perteneciente a un cliente, que puede contener un área o edificio opcional para ubicar equipos con mayor precisión, y una ciudad y un país cuando la observación los reporta.
 _Avoid_: Cliente, área
 
 **Historial de cambios**:

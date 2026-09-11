@@ -106,7 +106,7 @@ export function regionalPanorama(db, now = () => new Date()) {
       const quantity = Math.max(1, Number(item.quantity) || 1);
       return Array.from({ length: quantity }, (_, index) => ({
         id: `${row.id}:${index + 1}`, hospitalId: row.hospital_id, client: hospital.client ?? 'Cliente no informado', hospital: hospital.name,
-        country: 'Ubicación no informada', city: 'Ciudad no informada', area: observation.reviewed.area ?? null, modality: item.modality ?? 'Modalidad no informada',
+        country: hospital.country ?? 'Ubicación no informada', city: hospital.city ?? 'Ciudad no informada', area: observation.reviewed.area ?? null, modality: item.modality ?? 'Modalidad no informada',
         manufacturer: item.manufacturer, model: item.model, serial: item.serial, age: item.age, capturedAt: observation.capturedAt,
         profile: observation.profile, confirmedFields, fictional: false,
         hasConflict: conflicts.some(conflict => conflict.itemIds?.includes(row.id) && ['modality', 'manufacturer', 'model', 'serial', 'age'].includes(conflict.field)),

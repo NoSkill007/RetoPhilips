@@ -32,6 +32,8 @@ export function assessObservation(observation, now) {
     client: classify(observation.reviewed.client, observation.extracted?.client, observation.originalText, confirmed.has('client')),
     hospital: classify(observation.reviewed.hospital, observation.extracted?.hospital, observation.originalText, confirmed.has('hospital')),
     area: classify(observation.reviewed.area, observation.extracted?.area, observation.originalText, confirmed.has('area')),
+    city: classify(observation.reviewed.city ?? null, observation.extracted?.city, observation.originalText, confirmed.has('city')),
+    country: classify(observation.reviewed.country ?? null, observation.extracted?.country, observation.originalText, confirmed.has('country')),
   };
   const equipment = observation.reviewed.equipment.map(/** @param {any} item @param {number} index */ (item, index) => {
     const raw = rawEquipment[index] ?? {};

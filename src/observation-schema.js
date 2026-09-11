@@ -3,12 +3,15 @@ import { z } from 'zod';
 export const roles = ['Ingeniero de servicio', 'Vendedor', 'Especialista'];
 export const modalities = ['Resonancia magnética', 'Tomografía computarizada', 'Ultrasonido', 'Monitoreo de pacientes', 'Rayos X', 'Sistema intervencionista', 'Mamografía', 'Medicina nuclear / PET', 'Electrocardiografía', 'Ventilación mecánica', 'Desfibrilador', 'Endoscopia', 'Otro'];
 const field = z.string().trim().min(1).max(300).nullable();
+/** City/country are optional keys (not just nullable values) so observations captured, stored, or asserted in
+ * tests before this field existed keep parsing without every fixture needing to add them. */
+const optionalField = field.optional();
 export const rawSchema = z.object({
-  client: field, hospital: field, area: field,
+  client: field, hospital: field, area: field, city: optionalField, country: optionalField,
   equipment: z.array(z.object({ modality: field, quantity: field, manufacturer: field, model: field, serial: field, age: field }).strict()).min(1).max(20),
 }).strict();
 export const reviewedSchema = z.object({
-  client: field, hospital: field, area: field,
+  client: field, hospital: field, area: field, city: optionalField, country: optionalField,
   equipment: z.array(z.object({
     modality: z.enum(modalities).nullable(), quantity: z.number().int().min(1).max(10000).nullable(),
     manufacturer: field, model: field, serial: field, age: z.number().min(0).max(150).nullable(),
@@ -38,6 +41,7 @@ export function sanitizeExtraction(raw) {
   const input = /** @type {Record<string, any>} */ (raw);
   return {
     ...input, client: fieldValue(input.client), hospital: fieldValue(input.hospital), area: fieldValue(input.area),
+    city: fieldValue(input.city), country: fieldValue(input.country),
     equipment: Array.isArray(input.equipment) ? input.equipment.map(item => item && typeof item === 'object' ? Object.fromEntries(Object.entries(item).map(([key, value]) => [key, fieldValue(value)])) : item) : input.equipment,
   };
 }
@@ -55,20 +59,32 @@ function numeric(value) {
 function modality(value) {
   if (!value) return null;
   const text = normalize(value);
-  const patterns = [/resonancia|\bmri?\b|magnetic/, /tomograf|\bct\b|computed tomography/, /ultra|\bus\b/, /monitor/, /rayos|x.ray/, /interven/,
+  const patterns = [/resonancia|\bmri?\b|magnetic/, /tomograf|\bct\b|computed tomography/, /ultra|\bus\b|ecograf|sonograph/, /monitor/, /rayos|x.ray/, /interven/,
     /mamograf|mammogra/, /medicina nuclear|nuclear medicine|\bpet\b/, /electrocardiograf|\becg\b|\bekg\b/, /ventilad|ventilator/, /desfibrilad|defibrillat/, /endoscop/];
   const index = patterns.findIndex(pattern => pattern.test(text));
   if (index >= 0) return modalities[index];
   return /\botro\b|\bother\b/.test(text) ? modalities.at(-1) : null;
 }
-/** @param {string | null} value */
-function ageInYears(value) {
-  return value && /\b(anos?|years?)\b/.test(normalize(value)) ? numeric(value) : null;
+/** Converts a duration ("ocho años") or, absent one, an install year stated nearby ("instalado en 2018",
+ * "desde 2018") into an age in years as of `now`. A bare year with no installation cue is left unknown,
+ * since a random four-digit number in the clause is not reliably an equipment date.
+ * @param {string | null} value @param {string} context @param {Date} now */
+function ageInYears(value, context, now) {
+  if (!value || !context.includes(normalize(value))) return null;
+  const normalizedValue = normalize(value);
+  if (/\b(anos?|years?)\b/.test(normalizedValue)) return numeric(value);
+  const year = normalizedValue.match(/\b(19\d{2}|20\d{2})\b/);
+  if (!year) return null;
+  const valueIndex = context.indexOf(normalizedValue);
+  const before = context.slice(Math.max(0, valueIndex - 40), valueIndex);
+  if (!/instal|\bdesde\b|\bsince\b|\bfrom\b/.test(before)) return null;
+  const age = now.getFullYear() - Number(year[1]);
+  return age >= 0 && age <= 150 ? age : null;
 }
 /** Retain only literal source-backed strings; semantic validation expands in #4.
- * @param {unknown} raw @param {string} source
+ * @param {unknown} raw @param {string} source @param {Date} [now]
  */
-export function validateExtraction(raw, source) {
+export function validateExtraction(raw, source, now = new Date()) {
   const fields = rawSchema.parse(raw);
   const normalizedSource = normalize(source);
   /** @param {string} value */
@@ -82,6 +98,17 @@ export function validateExtraction(raw, source) {
     if (new RegExp(`\\b(?:${label})\\b`, 'i').test(normalize(accepted))) return accepted;
     const quoted = escape(normalize(accepted));
     return new RegExp(`(?:${label})[^.\\n]{0,35}\\b${quoted}\\b`, 'i').test(normalizedSource) ? accepted : null;
+  };
+  /** Falls back to accepting a value stated right next to the hospital mention (e.g. "en São Paulo, Brasil,
+   * en el Hospital Aurora") when no explicit "ciudad"/"país" label is present — the same natural-speech gap
+   * as equipment manufacturer/model. @param {string | null} value @param {string} label @param {number} anchorIndex */
+  const anchoredNearHospital = (value, label, anchorIndex) => {
+    const direct = anchored(value, label);
+    if (direct) return direct;
+    const accepted = supported(value);
+    if (!accepted || anchorIndex < 0) return null;
+    const valueIndex = normalizedSource.indexOf(normalize(accepted));
+    return valueIndex >= 0 && Math.abs(valueIndex - anchorIndex) <= 40 ? accepted : null;
   };
   const occurrences = new Map();
   const mentions = fields.equipment.map(item => {
@@ -105,7 +132,10 @@ export function validateExtraction(raw, source) {
     if (mention < 0) return '';
     const before = [normalizedSource.lastIndexOf('.', mention - 1), normalizedSource.lastIndexOf('\n', mention - 1)];
     let start = Math.max(...before) + 1;
-    const after = [normalizedSource.indexOf('.', mention), normalizedSource.indexOf('\n', mention)].filter(position => position >= 0);
+    // A single reported equipment has no sibling mention that later sentences could bleed into, so everything
+    // stated after it (an install year, a brand named after "no estoy seguro...") stays in its context — but
+    // text before it (e.g. a hospital name sentence) is left bounded, since that risk is independent of sibling count.
+    const after = positions.length <= 1 ? [] : [normalizedSource.indexOf('.', mention), normalizedSource.indexOf('\n', mention)].filter(position => position >= 0);
     let end = after.length ? Math.min(...after) : normalizedSource.length;
     const previous = positions.filter(position => position < mention && position >= start).at(-1);
     const next = positions.find(position => position > mention && position <= end);
@@ -126,38 +156,48 @@ export function validateExtraction(raw, source) {
     const rawModality = supported(item.modality);
     const modalityText = normalize(rawModality ?? '');
     const context = clauseFor(itemIndex);
-    /** @param {string | null} value @param {string} label */
-    const equipmentField = (value, label) => {
+    const modalityIndex = context.indexOf(modalityText);
+    /** Accept a value either next to an explicit label (e.g. "fabricante GE") or, absent a label,
+     * simply adjacent to the equipment's own modality mention (e.g. "un ecógrafo GE Voluson") —
+     * natural speech usually states the brand/model right next to the equipment noun without labeling it.
+     * @param {string | null} value @param {string} label @param {boolean} [allowAdjacentToModality] */
+    const equipmentField = (value, label, allowAdjacentToModality = false) => {
       const accepted = value && context.includes(normalize(value)) ? value : null;
       if (!accepted) return null;
       const quoted = escape(normalize(accepted));
-      return new RegExp(`(?:${label})[^,;.\\n]{0,30}\\b${quoted}\\b`, 'i').test(context) ? accepted : null;
+      if (new RegExp(`(?:${label})[^,;.\\n]{0,30}\\b${quoted}\\b`, 'i').test(context)) return accepted;
+      if (!allowAdjacentToModality || modalityText.length === 0 || modalityIndex < 0) return null;
+      const valueIndex = context.indexOf(normalize(accepted));
+      return valueIndex >= 0 && Math.abs(valueIndex - modalityIndex) <= 40 ? accepted : null;
     };
     const quantity = numeric(item.quantity);
-    const modalityIndex = context.indexOf(modalityText);
     const quantitySupported = quantity === null ? null : [...context.matchAll(/\d+(?:[.,]\d+)?|[a-z]+/g)].some(match => {
       const tokenIndex = match.index;
       return numeric(match[0]) === quantity && ((tokenIndex <= modalityIndex && modalityIndex - tokenIndex <= 30) || /(?:cantidad|quantity|count)[^,;.\n]{0,20}$/.test(context.slice(0, tokenIndex)));
     }) ? quantity : null;
     return {
       modality: modality(rawModality), quantity: quantitySupported,
-      manufacturer: equipmentField(item.manufacturer, 'fabricante|marca|manufacturer|brand|made by'),
-      model: equipmentField(item.model, 'modelo|model'),
+      manufacturer: equipmentField(item.manufacturer, 'fabricante|marca|manufacturer|brand|made by', true),
+      model: equipmentField(item.model, 'modelo|model', true),
       serial: equipmentField(item.serial, 'numero de serie|número de serie|serial|s[\\s./-]*n'),
-      age: ageInYears(item.age && context.includes(normalize(item.age)) ? item.age : null),
+      age: ageInYears(item.age, context, now),
     };
   });
   const unique = equipment.filter((item, index) => equipment.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(item)) === index);
+  const hospitalAccepted = anchored(fields.hospital, 'hospital|clinica|clinic|centro medico|medical center');
+  const hospitalIndex = hospitalAccepted ? normalizedSource.indexOf(normalize(hospitalAccepted)) : -1;
   const reviewed = reviewedSchema.parse({
     client: anchored(fields.client, 'cliente|client|organizacion|organization'),
-    hospital: anchored(fields.hospital, 'hospital|clinica|clinic|centro medico|medical center'),
-    area: anchored(fields.area, 'area|departamento|department|edificio|building'),
+    hospital: hospitalAccepted,
+    area: anchored(fields.area, 'area|departamento|department|edificio|building|sala|unidad|servicio|consultorio|piso|planta|ala|pabellon|room|unit|service|ward|wing|floor'),
+    city: anchoredNearHospital(fields.city ?? null, 'ciudad|city', hospitalIndex),
+    country: anchoredNearHospital(fields.country ?? null, 'pais|country', hospitalIndex),
     equipment: unique,
   });
   const issues = [];
-  const locationLabels = { client: 'Cliente', hospital: 'Hospital', area: 'Área' };
-  for (const key of /** @type {const} */ (['client', 'hospital', 'area'])) {
-    if (fields[key] !== null && reviewed[key] === null) issues.push(`${locationLabels[key]} rechazado: no está respaldado en ese contexto del relato.`);
+  const locationLabels = { client: 'Cliente', hospital: 'Hospital', area: 'Área', city: 'Ciudad', country: 'País' };
+  for (const key of /** @type {const} */ (['client', 'hospital', 'area', 'city', 'country'])) {
+    if (fields[key] != null && reviewed[key] === null) issues.push(`${locationLabels[key]} rechazado: no está respaldado en ese contexto del relato.`);
   }
   const equipmentLabels = { modality: 'Modalidad', quantity: 'Cantidad', manufacturer: 'Fabricante', model: 'Modelo', serial: 'Número de serie', age: 'Antigüedad' };
   fields.equipment.forEach((item, index) => {

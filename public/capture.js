@@ -84,7 +84,7 @@ function renderAssessment(target, assessment) {
   }
   target.append(components, node('h3', 'Estado de cada campo'));
   const states = document.createElement('dl'); states.className = 'field-states';
-  for (const [key, label] of [['client', 'Cliente'], ['hospital', 'Hospital'], ['area', 'Área']]) states.append(node('dt', label), node('dd', assessment.fields[key].state));
+  for (const [key, label] of [['client', 'Cliente'], ['hospital', 'Hospital'], ['area', 'Área'], ['city', 'Ciudad'], ['country', 'País']]) states.append(node('dt', label), node('dd', assessment.fields[key].state));
   assessment.equipment.forEach(/** @param {any} equipment @param {number} index */ (equipment, index) => {
     for (const [key, label] of equipmentFields) states.append(node('dt', `${label} · equipo ${index + 1}`), node('dd', equipment[key].state));
   });
@@ -126,7 +126,7 @@ function renderFollowUp() {
 function renderReview() {
   el('draft-author').textContent = `Observación de ${draft.profile.name} · ${draft.profile.role}`;
   el('location-fields').replaceChildren(); el('equipment-cards').replaceChildren();
-  for (const [key, label] of [['client', 'Cliente'], ['hospital', 'Hospital'], ['area', 'Área o edificio']]) el('location-fields').append(inputField(key, label, draft.reviewed[key]));
+  for (const [key, label] of [['client', 'Cliente'], ['hospital', 'Hospital'], ['area', 'Área o edificio'], ['city', 'Ciudad'], ['country', 'País']]) el('location-fields').append(inputField(key, label, draft.reviewed[key] ?? null));
   for (const equipment of draft.reviewed.equipment) addCard(equipment);
   const target = select('hospital-choice'); target.replaceChildren(); option(target, '', 'Selecciona un destino');
   option(target, 'new', 'Crear un hospital con los datos revisados');
@@ -163,11 +163,13 @@ async function renderSplitGroups(hospitalId) {
 }
 select('hospital-choice').addEventListener('change', async () => {
   const hospital = hospitals.find(h => h.id === select('hospital-choice').value);
-  for (const key of ['hospital', 'client']) {
+  /** @type {Record<string, string>} */
+  const hospitalFields = { hospital: 'name', client: 'client', city: 'city', country: 'country' };
+  for (const [key, property] of Object.entries(hospitalFields)) {
     const input = form('review-form').elements.namedItem(key);
     if (input instanceof HTMLInputElement) {
       input.readOnly = Boolean(hospital);
-      input.value = hospital ? String((key === 'hospital' ? hospital.name : hospital.client) ?? '') : String(draft.reviewed[key] ?? '');
+      input.value = hospital ? String(hospital[property] ?? '') : String(draft.reviewed[key] ?? '');
     }
   }
   try { await renderSplitGroups(hospital?.id ?? null); } catch (error) { report(error); }
@@ -193,6 +195,7 @@ form('review-form').addEventListener('submit', async event => {
   const button = el('save'); if (!(button instanceof HTMLButtonElement)) return;
   const data = new FormData(form('review-form'));
   const reviewed = { client: data.get('client') || null, hospital: data.get('hospital') || null, area: data.get('area') || null,
+    city: data.get('city') || null, country: data.get('country') || null,
     equipment: [...el('equipment-cards').querySelectorAll('fieldset')].map(card => {
       /** @type {Record<string, string | number | null>} */
       const equipment = {};
@@ -283,6 +286,7 @@ function opportunityCard(signal, actionable) {
 async function showHospital(id) {
   const hospital = await api('/api/hospitals/' + id); const target = el('hospital-view'); target.replaceChildren();
   target.append(node('h2', `Perfil 360 · ${hospital.name}`), node('p', `Cliente: ${hospital.client ?? 'Desconocido'}`));
+  if (!hospital.fictional) target.append(node('p', `Ubicación: ${hospital.city ?? 'Ciudad desconocida'}, ${hospital.country ?? 'País desconocido'}`));
   target.append(node('h3', `Base instalada · ${hospital.installedBase.total} equipos reportados`));
   const base = document.createElement('div'); base.className = 'installed-base';
   if (!hospital.installedBase.items.length) base.append(node('p', 'Todavía no hay equipos representados.'));

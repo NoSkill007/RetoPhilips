@@ -24,6 +24,9 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
     CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS observations (id TEXT PRIMARY KEY, draft_id TEXT UNIQUE NOT NULL, hospital_id TEXT NOT NULL, data TEXT NOT NULL);
   `);
+  const hospitalColumns = new Set(db.prepare('PRAGMA table_info(hospitals)').all().map(row => String(row.name)));
+  if (!hospitalColumns.has('city')) db.exec('ALTER TABLE hospitals ADD COLUMN city TEXT');
+  if (!hospitalColumns.has('country')) db.exec('ALTER TABLE hospitals ADD COLUMN country TEXT');
   const base = installedBase(db, now);
   const regional = regionalPanorama(db, now);
   const query = naturalQuery(regional, interpretQuery);
@@ -153,7 +156,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
             ...(attempts === 2 ? { correctiveInstruction } : {}) });
           const inference = inferenceSchema.parse(extraction.metadata);
           const cleanedFields = sanitizeExtraction(extraction.fields);
-          const validation = validateExtraction(cleanedFields, text);
+          const validation = validateExtraction(cleanedFields, text, new Date(capturedAt));
           const score = Number(validation.reviewed.hospital !== null) * 10 + validation.reviewed.equipment.reduce((total, item) => total + Object.values(item).filter(value => value !== null).length, 0);
           const candidate = { extraction, inference, reviewed: validation.reviewed, cleanedFields, score, issues: validation.issues, attempt: attempts };
           if (!bestResult || candidate.score > bestResult.score) bestResult = candidate;
@@ -242,11 +245,11 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       db.exec('BEGIN');
       try {
         if (!hospital) {
-          hospital = { id: randomUUID(), name: input.reviewed.hospital, client: input.reviewed.client };
-          db.prepare('INSERT INTO hospitals VALUES (?, ?, ?)').run(hospital.id, hospital.name, hospital.client);
+          hospital = { id: randomUUID(), name: input.reviewed.hospital, client: input.reviewed.client, city: input.reviewed.city ?? null, country: input.reviewed.country ?? null };
+          db.prepare('INSERT INTO hospitals VALUES (?, ?, ?, ?, ?)').run(hospital.id, hospital.name, hospital.client, hospital.city, hospital.country);
         }
         const observation = { id: randomUUID(), hospitalId: hospital.id, originalText: draft.originalText,
-          reviewed: { ...input.reviewed, hospital: hospital.name, client: hospital.client }, extracted: draft.extracted,
+          reviewed: { ...input.reviewed, hospital: hospital.name, client: hospital.client, city: hospital.city ?? null, country: hospital.country ?? null }, extracted: draft.extracted,
           profile: draft.profile, provenance: draft.provenance,
           capturedAt: draft.capturedAt, createdAt: now().toISOString() };
         db.prepare('INSERT INTO observations VALUES (?, ?, ?, ?)').run(observation.id, input.draftId, observation.hospitalId, JSON.stringify(observation));

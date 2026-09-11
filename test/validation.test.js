@@ -10,10 +10,10 @@ const valid = { client: null, hospital: 'Hospital Aurora', area: null, equipment
   { modality: 'tomógrafos', quantity: 'dos', manufacturer: 'DemoMed', model: null, serial: null, age: null },
 ] };
 
-/** @param {(text: string, options?: {attempt: number, correctiveInstruction?: string}) => Promise<any>} extractText */
-async function scenario(extractText) {
+/** @param {(text: string, options?: {attempt: number, correctiveInstruction?: string}) => Promise<any>} extractText @param {() => Date} [now] */
+async function scenario(extractText, now) {
   const directory = await mkdtemp(join(tmpdir(), 'sitesignal-validation-'));
-  const app = await startApplication({ dataDirectory: directory, port: 0, extractText,
+  const app = await startApplication({ dataDirectory: directory, port: 0, extractText, now,
     probeQvac: async () => ({ state: 'ready', message: 'Listo' }) });
   /** @param {string} path @param {unknown} body */
   async function post(path, body) {
@@ -101,5 +101,79 @@ test('conserva la parte segura cuando QVAC usa textos para null y repite afirmac
     assert.ok(draft.reviewed.equipment.some(/** @param {any} item */ item => item.modality === 'Tomografía computarizada' && item.quantity === 1));
     assert.ok(draft.provenance.validationIssues.length > 0);
     assert.ok(draft.extracted.equipment.every(/** @param {any} item */ item => !Object.values(item).includes('null') && !Object.values(item).includes('no specified')));
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});
+
+test('un fabricante o modelo mencionado junto al equipo se acepta sin exigir la palabra "fabricante"/"modelo"', async () => {
+  const text = 'Acabo de salir de la Clínica San Fernando en Vía España, Panamá. Vi que tienen dos ecógrafos en ginecología, uno es un GE Voluson bastante nuevo, como de dos años. El otro es un Philips más viejito pero no alcancé a ver el modelo. También pasé por rayos X y tienen un tomógrafo Toshiba que se ve de más de 10 años, deberían cambiarlo pronto';
+  const claims = { client: null, hospital: 'Clínica San Fernando', area: 'ginecología', equipment: [
+    { modality: 'ecógrafo', quantity: 'dos', manufacturer: 'GE', model: 'Voluson', serial: null, age: 'dos años' },
+    { modality: 'ecógrafo', quantity: null, manufacturer: 'Philips', model: null, serial: null, age: null },
+    { modality: 'tomógrafo', quantity: 'uno', manufacturer: 'Toshiba', model: null, serial: null, age: 'más de 10 años' },
+  ] };
+  const context = await scenario(async () => ({ fields: claims, metadata: { engine: 'QVAC', model: 'fixture', durationMs: 2 } }));
+  try {
+    const draft = await context.post('/api/drafts', { text });
+    assert.equal(draft.reviewed.hospital, 'Clínica San Fernando');
+    assert.equal(draft.reviewed.equipment[0].modality, 'Ultrasonido');
+    assert.equal(draft.reviewed.equipment[0].manufacturer, 'GE');
+    assert.equal(draft.reviewed.equipment[0].model, 'Voluson');
+    assert.equal(draft.reviewed.equipment[0].quantity, 2);
+    assert.equal(draft.reviewed.equipment[0].age, 2);
+    assert.equal(draft.reviewed.equipment[2].modality, 'Tomografía computarizada');
+    assert.equal(draft.reviewed.equipment[2].manufacturer, 'Toshiba');
+    assert.equal(draft.reviewed.equipment[2].age, 10);
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});
+
+test('un área nombrada de forma natural (sala, unidad, servicio) se acepta sin la palabra "área"', async () => {
+  const text = 'Estoy en el Hospital Santo Tomás en Ciudad de Panamá. En la sala de urgencias vi un resonador magnético cerrado de 1.5T. No estoy seguro de la marca, parecía Siemens o Philips, pero el técnico de turno me dijo que lo instalaron como en 2018. Está funcionando bien.';
+  const claims = { client: null, hospital: 'Hospital Santo Tomás', area: 'sala de urgencias', equipment: [
+    { modality: 'resonador magnético', quantity: 'un', manufacturer: 'Siemens', model: null, serial: null, age: '2018' },
+  ] };
+  const context = await scenario(async () => ({ fields: claims, metadata: { engine: 'QVAC', model: 'fixture', durationMs: 2 } }));
+  try {
+    const draft = await context.post('/api/drafts', { text });
+    assert.equal(draft.reviewed.area, 'sala de urgencias');
+    // "Siemens o Philips" is stated as uncertain between two named brands — correctly stays unknown, not a guess.
+    assert.equal(draft.reviewed.equipment[0].manufacturer, null);
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});
+
+test('un año de instalación mencionado en el relato se convierte a antigüedad usando la fecha de captura', async () => {
+  const text = 'Visité Hospital Aurora. Vi un tomógrafo. El técnico me dijo que lo instalaron en 2016.';
+  const claims = { client: null, hospital: 'Hospital Aurora', area: null, equipment: [
+    { modality: 'tomógrafo', quantity: null, manufacturer: null, model: null, serial: null, age: '2016' },
+  ] };
+  const context = await scenario(async () => ({ fields: claims, metadata: { engine: 'QVAC', model: 'fixture', durationMs: 2 } }), () => new Date('2026-09-10T12:00:00.000Z'));
+  try {
+    const draft = await context.post('/api/drafts', { text });
+    assert.equal(draft.reviewed.equipment[0].age, 10);
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});
+
+test('un número de cuatro dígitos sin indicio de instalación no se confunde con antigüedad', async () => {
+  const text = 'Visité Hospital Aurora. Vi un tomógrafo, número de serie 2016.';
+  const claims = { client: null, hospital: 'Hospital Aurora', area: null, equipment: [
+    { modality: 'tomógrafo', quantity: null, manufacturer: null, model: null, serial: '2016', age: '2016' },
+  ] };
+  const context = await scenario(async () => ({ fields: claims, metadata: { engine: 'QVAC', model: 'fixture', durationMs: 2 } }));
+  try {
+    const draft = await context.post('/api/drafts', { text });
+    assert.equal(draft.reviewed.equipment[0].serial, '2016');
+    assert.equal(draft.reviewed.equipment[0].age, null);
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});
+
+test('una afirmación de fabricante ausente del relato sigue rechazándose aunque la modalidad esté cerca', async () => {
+  const text = 'Visité Hospital Aurora. Vi dos teletransportadores.';
+  const claims = { client: null, hospital: 'Hospital Aurora', area: null, equipment: [
+    { modality: 'teletransportadores', quantity: 'dos', manufacturer: 'Inventado', model: null, serial: null, age: null },
+  ] };
+  const context = await scenario(async () => ({ fields: claims, metadata: { engine: 'QVAC', model: 'fixture', durationMs: 2 } }));
+  try {
+    const draft = await context.post('/api/drafts', { text });
+    assert.equal(draft.reviewed.equipment[0].manufacturer, null);
+    assert.ok(draft.provenance.validationIssues.some(/** @param {string} issue */ issue => /fabricante/i.test(issue)));
   } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
 });
