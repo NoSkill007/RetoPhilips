@@ -139,12 +139,5 @@ Sin frameworks de frontend ni bundlers: HTML, CSS y JavaScript nativo servidos d
 | Imágenes | `sharp` |
 | Mapa | `leaflet` + OpenStreetMap |
 
-## Más recursos
-
-- 🎬 [`DEMO.md`](DEMO.md) — guion de demostración de 5 minutos.
-- 📋 [`CONTEXT.md`](CONTEXT.md) — vocabulario de dominio compartido.
-- 🗂️ [`HANDOFF.md`](HANDOFF.md) — historial técnico completo para retomar el desarrollo.
-
----
 
 Todo dato de demostración es sintético. No se incluye información de pacientes o clientes reales.
