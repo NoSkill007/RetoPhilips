@@ -12,15 +12,15 @@ El conocimiento sobre qué equipos hay realmente instalados en cada hospital viv
 
 ## Qué hace SiteSignal
 
-- **Captura sin fricción**: escribe o dicta el relato de la visita en español o inglés.
-- **Extracción local con IA**: un modelo QVAC (Qwen3 4B) convierte el relato en campos estructurados — nunca inventa un dato que el texto no respalde.
-- **Revisión humana obligatoria**: nada se guarda sin que un colaborador confirme la interpretación.
-- **Confianza explicable**: cada dato queda como `Confirmado`, `Reportado`, `Estimado` o `Desconocido`, con un puntaje desglosado (completitud, vigencia, evidencia).
-- **Evidencia fotográfica**: sube una foto de la placa del equipo y OCR local extrae fabricante, modelo, serie y año.
-- **Duplicados y conflictos nunca se resuelven solos**: la app sugiere, pero una persona decide.
-- **Panorama regional con mapa real**: filtra por país, ciudad, modalidad, confianza y vigencia; pregúntale en lenguaje natural.
-- **Oportunidades de renovación explicables**: señala equipos candidatos con sus condiciones visibles, nunca una caja negra.
-- **Exportación abierta**: CSV de la base instalada y JSON completo con procedencia, en un clic.
+- **Captura sin fricción**: escribe o dicta el relato en español o inglés.
+- **Extracción local con IA**: QVAC (Qwen3 4B) estructura el relato — nunca inventa un dato que el texto no respalde.
+- **Revisión humana obligatoria**: nada se guarda sin confirmación de un colaborador.
+- **Confianza explicable**: `Confirmado`, `Reportado`, `Estimado` o `Desconocido`, con puntaje desglosado.
+- **Evidencia fotográfica**: OCR local lee fabricante, modelo, serie y año de una foto de la placa.
+- **Duplicados y conflictos nunca se resuelven solos**: la app sugiere, una persona decide.
+- **Panorama regional con mapa real**: filtros por país/ciudad/modalidad y preguntas en lenguaje natural.
+- **Oportunidades de renovación explicables**: condiciones visibles, nunca una caja negra.
+- **Exportación abierta**: CSV y JSON completo con procedencia, en un clic.
 
 ## Arquitectura
 
@@ -57,86 +57,52 @@ flowchart LR
 
 ## Inicio rápido (Windows, con conexión la primera vez)
 
-1. Instala **Node.js 24+** (probado con 26.7.0). Abre PowerShell en este repositorio.
+1. Instala **Node.js 24+**. Abre PowerShell en este repositorio.
 2. `npm ci`
 3. `npx qvac doctor` — comprueba el runtime.
-4. `npm run qvac:prepare:text` — descarga Qwen3 4B Q4_K_M (~2.5 GB) y muestra la ruta local exacta. Hazlo antes de desconectarte.
-5. Arranca con la ruta que te mostró el paso anterior:
+4. `npm run qvac:prepare:text` — descarga Qwen3 4B Q4_K_M (~2.5 GB) y muestra la ruta local exacta.
+5. Arranca con esa ruta:
 
 ```powershell
 $env:SITESIGNAL_MODEL = 'C:\Users\tu-usuario\.qvac\models\archivo_Qwen3-4B-Q4_K_M.gguf'
 .\Start-SiteSignal.ps1
 ```
 
-Si PowerShell bloquea scripts: `powershell -ExecutionPolicy Bypass -File .\Start-SiteSignal.ps1`. El iniciador abre el navegador solo cuando el servidor ya escucha en `http://127.0.0.1:3210`. También puedes usar `npm start` y abrir la URL manualmente.
+Si PowerShell bloquea scripts: `powershell -ExecutionPolicy Bypass -File .\Start-SiteSignal.ps1`. El iniciador abre el navegador cuando el servidor ya escucha en `http://127.0.0.1:3210`. También puedes usar `npm start` y abrir la URL manualmente.
 
-Voz y evidencia fotográfica son opcionales — ver [Funciones](#funciones) más abajo para prepararlas.
+Voz y evidencia fotográfica son opcionales — ver [Funciones](#funciones).
 
 ## Funciones
 
-### Extracción de texto y revisión
+**Extracción y revisión** — cada dato se valida contra un schema estricto y la cláusula del relato que lo respalda; un valor sin respaldo literal se rechaza. Un único reintento corrige salidas inválidas; si no queda nada útil, abre tarjetas vacías con procedencia `Manual`. Hasta tres preguntas de seguimiento completan lo que falta, nombrando la modalidad conocida en vez de un genérico "Equipo 2".
 
-Cada extracción se valida contra un schema estricto, el catálogo de modalidades y la cláusula del relato asociada a cada equipo — un valor sin respaldo literal en el texto se rechaza. Si la primera salida de QVAC es inválida, SiteSignal reintenta una vez con instrucciones correctivas; puede conservar una extracción parcial cuando quedan un hospital y una modalidad respaldados, dejando los campos dudosos vacíos para revisión. Si no queda nada útil, abre tarjetas vacías, conserva el relato original y registra procedencia `Manual`.
+**Confianza explicable** — cada campo es `Confirmado`, `Reportado`, `Estimado` o `Desconocido`. El puntaje suma 40 pts de completitud + 25 de vigencia (decrece a cero en doce meses) + 35 de evidencia o confirmación independiente. Bandas: Baja 0–49, Media 50–79, Alta 80–100.
 
-### Preguntas de seguimiento
+**Grupos, duplicados y conflictos** — una cantidad conjunta se guarda como grupo, sin inventar series ni identidades; se separa registrando una unidad con serie propia. Una serie idéntica es coincidencia fuerte; sin serie, se sugieren candidatos comparables lado a lado — **solo una decisión humana explícita consolida**. Conflictos y correcciones quedan en un historial auditable. Si nombre, cliente, ciudad y país ya coinciden con un hospital existente, el destino se autoselecciona.
 
-SiteSignal formula hasta tres preguntas, una por vez, en este orden: hospital, modalidad, cantidad, fabricante, modelo y antigüedad — cada una permite responder "No lo sé". Cuando ya se conoce la modalidad de un equipo, la pregunta la nombra directamente ("¿Cuántos equipos de Tomografía computarizada observaste?") en vez de un genérico "Equipo 2".
+**Panorama regional** — dataset determinista de doce hospitales y setenta y dos equipos ficticios en cinco países. Hospital, cliente y colaboradores son enteramente ficticios; fabricante y modelo usan marcas reales del sector (Philips, GE Healthcare, Siemens Healthineers, Canon Medical, Mindray) — nombres públicos de producto, no datos de pacientes. Mapa Leaflet con coordenadas locales (sin geocodificación en línea), filtros por región/país/ciudad/modalidad, y consultas en **lenguaje natural** que QVAC traduce a filtros visibles y editables — nunca genera ni ejecuta SQL.
 
-### Confianza explicable
-
-Cada campo se muestra como `Confirmado`, `Reportado`, `Estimado` o `Desconocido`; el estado general toma el más débil entre hospital, modalidad y cantidad. La confianza suma hasta **40 puntos de completitud** (hospital 8; por equipo: modalidad 8, cantidad 8, fabricante 5, modelo 5, antigüedad 6), **25 de vigencia** (decrece linealmente a cero a los doce meses) y **35 según evidencia o confirmación independiente**. Bandas: Baja 0–49, Media 50–79, Alta 80–100. Serie y área conservan su estado sin reducir el puntaje, porque pueden no aplicar.
-
-### Grupos, duplicados y conflictos
-
-Una cantidad conjunta se incorpora como un **grupo**, sin inventar números de serie ni identidades. Para separar una unidad: registra una nueva observación con cantidad 1 y número de serie, selecciona el hospital existente y relaciónala con el grupo — la unidad conserva ambas observaciones como procedencia, y el grupo reduce su cantidad sin alterar el total.
-
-Una serie idéntica es coincidencia fuerte de duplicado. Sin serie, SiteSignal sugiere candidatos cuando coinciden hospital, modalidad y al menos otro dato — la comparación muestra coincidencias y diferencias lado a lado, y **solo una decisión humana explícita consolida**. Observaciones incompatibles sobre el mismo equipo quedan como conflictos pendientes hasta que alguien elige un valor respaldado y explica por qué. Toda corrección registra valor anterior, valor nuevo, autor, fecha y motivo, y queda en un historial separado de la proyección actual.
-
-Si el nombre, cliente, ciudad y país de una nueva observación ya coinciden con un hospital existente (incluso si uno de los dos omite la palabra genérica "Hospital"/"Clínica"), el destino se autoselecciona — nunca se deja crear un segundo registro para el mismo sitio.
-
-### Panorama regional
-
-Dataset determinista de **doce hospitales y setenta y dos equipos** ficticios en cinco países (Panamá, Brasil, Colombia, México, Chile). El hospital, cliente y colaboradores son enteramente ficticios; el fabricante y modelo de cada equipo usan **marcas reales del sector médico** (Philips, GE Healthcare, Siemens Healthineers, Canon Medical, Mindray) con un modelo plausible por modalidad — son nombres públicos de productos, no datos de ningún paciente o cliente, y hacen que la demostración se lea como una base instalada real.
-
-Un mapa **Leaflet** ubica cada hospital por coordenadas resueltas desde un catálogo local (sin geocodificación en línea); resume hospitales, equipos, confianza, información desactualizada y oportunidades; filtra por cliente, hospital, región, país, ciudad y modalidad. Las capturas guardadas se incorporan y se distinguen del dataset precargado — restablecer la demo no las borra.
-
-### Consultas en lenguaje natural
-
-Pregúntale al panorama en español o inglés. QVAC interpreta **únicamente filtros visibles** (ubicación, cliente, hospital, modalidad, antigüedad, estado, confianza, vigencia), editables o removibles antes de aplicar. SiteSignal valida cada valor contra el catálogo local y contra las palabras de la pregunta, y explica el resultado. Las solicitudes ambiguas no aplican filtros — **el modelo nunca genera ni ejecuta SQL**.
-
-### Dictado de voz *(opcional)*
-
-Graba la observación desde el navegador, elige español o inglés, y transcríbela en este equipo con QVAC (Whisper small multilingüe, decodificación determinista). Ningún audio sale a la nube; la transcripción llena el mismo cuadro de texto y sigue el flujo normal de revisión.
+**Dictado de voz** *(opcional)* — graba y transcribe en el equipo con Whisper local, en español o inglés; llena el mismo cuadro de texto y sigue el flujo normal.
 
 ```powershell
-npm run qvac:prepare:voice   # descarga ggml-small-q8_0.bin (~264 MB)
-$env:SITESIGNAL_VOICE_MODEL = 'ruta que te muestre el comando anterior'
+npm run qvac:prepare:voice
+$env:SITESIGNAL_VOICE_MODEL = 'ruta que muestre el comando anterior'
 ```
 
-Sin esa variable, el dictado queda deshabilitado y la captura escrita sigue intacta.
-
-### Evidencia fotográfica *(opcional)*
-
-Cada tarjeta de equipo admite una foto de su placa o etiqueta. OCR local (EasyOCR) detecta el texto; un analizador determinista — sin LLM — busca las etiquetas conocidas de fabricante, modelo, serie y fecha, y solo confirma un campo cuando el propio texto de la placa lo respalda. Los campos con respaldo fotográfico llegan directo a `Confirmado`.
+**Evidencia fotográfica** *(opcional)* — OCR local (EasyOCR) lee la placa del equipo; un analizador determinista confirma solo lo que el propio texto respalda, directo a `Confirmado`.
 
 ```powershell
-npm run qvac:prepare:photo   # descarga el modelo de OCR (~98 MB)
-$env:SITESIGNAL_PLATE_MODEL = 'ruta que te muestre el comando anterior'
+npm run qvac:prepare:photo
+$env:SITESIGNAL_PLATE_MODEL = 'ruta que muestre el comando anterior'
 ```
 
-Sin esa variable, la evidencia fotográfica queda deshabilitada y el resto de la captura sigue funcionando.
-
-### Exportaciones
-
-Desde la pantalla **Entorno**: "Exportar base instalada (CSV)" y "Exportar observaciones y evidencia (JSON)", ambas reflejando el estado exacto en ese momento (nunca una copia rezagada) y cubriendo solo lo capturado localmente — el dataset ficticio ya es reproducible desde el panorama, así que no se duplica en el archivo. El CSV es una fila por equipo con el estado de cada campo; el JSON incluye, por hospital, observaciones completas, base instalada con conflictos e historial, oportunidades, y referencias a evidencia fotográfica (metadata y texto OCR, nunca los bytes de la imagen).
+**Exportación** — desde **Entorno**: CSV de la base instalada y JSON completo (observaciones, conflictos, historial, oportunidades, evidencia) reflejando el estado exacto en ese momento.
 
 ## Privacidad y ejecución sin conexión
 
-Toda la interfaz (HTML, CSS, JS, Leaflet) se sirve desde `http://127.0.0.1:3210`. La **única** petición externa opcional en ejecución son las teselas del mapa base de OpenStreetMap; sin conexión, el mapa muestra un aviso discreto y sigue mostrando marcadores sobre fondo neutro — nada más se ve afectado. El arranque normal solo lee las rutas de modelo ya configuradas y **nunca descarga pesos**.
+La única petición externa opcional en ejecución son las teselas del mapa; sin conexión, muestra un aviso y sigue funcionando con marcadores sobre fondo neutro. El arranque normal nunca descarga pesos — solo la preparación inicial (`npm ci`, `qvac:prepare:*`) requiere red, una sola vez.
 
-La preparación (`npm ci`, `npx qvac doctor`, cada `qvac:prepare:*`) sí requiere conexión, una sola vez, para poblar la caché local de QVAC (`~/.qvac/models`).
-
-**Prueba real**: prepara los tres modelos con conexión, desconéctala, y ejecuta `npm start` con las tres variables configuradas. Captura, revisión, voz, evidencia, consultas, perfiles y exportaciones siguen disponibles sin ningún error.
+**Prueba real**: prepara los tres modelos con conexión, desconéctala, y ejecuta `npm start`. Captura, revisión, voz, evidencia, consultas, perfiles y exportaciones siguen disponibles sin error.
 
 ## Validación
 
@@ -145,24 +111,11 @@ npm run typecheck
 npm test
 ```
 
-Las pruebas consultan la API HTTP con SQLite temporal real y un adaptador de texto determinista — no dependen de QVAC ni de la red. Para probar la extracción real:
-
-```powershell
-$env:SITESIGNAL_MODEL = '...'
-npm run qvac:check:text     # extracción de texto en español e inglés
-
-$env:SITESIGNAL_VOICE_MODEL = '...'
-npm run qvac:check:voice    # transcribe dos muestras sintéticas de test/fixtures/
-
-$env:SITESIGNAL_PLATE_MODEL = '...'
-npm run qvac:check:photo    # analiza dos placas ficticias de test/fixtures/
-```
-
-Las respuestas de QVAC varían según el modelo y siempre pasan por revisión humana antes de guardarse.
+Las pruebas usan SQLite temporal real y un adaptador de texto determinista — no dependen de QVAC. Para probar la inferencia real: `npm run qvac:check:text` / `qvac:check:voice` / `qvac:check:photo`, con la variable de entorno correspondiente configurada.
 
 ## Garantías del prototipo frente a producción
 
-Este prototipo demuestra el flujo completo (captura, revisión, base instalada, panorama, exportación) con inferencia local y sin datos reales, pero **no** implementa controles de nivel de producción: sin cifrado de la base SQLite ni de los exports, sin control de acceso corporativo o autenticación multiusuario (el "perfil" es una etiqueta de procedencia local, no una identidad verificada), sin auditoría a prueba de manipulación, sin alta disponibilidad, sin gestión de vulnerabilidades de terceros. Una implementación real necesitaría esos controles antes de manejar información de pacientes o clientes.
+Demuestra el flujo completo con inferencia local y sin datos reales, pero **no** implementa controles de producción: sin cifrado en disco, sin autenticación multiusuario (el "perfil" es solo una etiqueta de procedencia), sin auditoría a prueba de manipulación ni alta disponibilidad. Una implementación real necesitaría esos controles antes de manejar información de pacientes o clientes.
 
 ## Variables de entorno
 
@@ -174,22 +127,17 @@ Este prototipo demuestra el flujo completo (captura, revisión, base instalada, 
 | `SITESIGNAL_PORT` | No | Puerto (1–65535); por defecto 3210 |
 | `SITESIGNAL_DATA` | No | Directorio de almacenamiento local |
 
-Un modelo de texto ausente abre la interfaz igual, con instrucciones de recuperación. Un puerto ocupado o almacenamiento sin permisos impide arrancar y lo indica en terminal; nunca se modifica ni elimina una base existente.
+## Stack
 
-## Stack y modelos
-
-Sin frameworks de frontend ni bundlers: HTML, CSS y JavaScript nativo (módulos ES) servidos directamente desde `public/`.
+Sin frameworks de frontend ni bundlers: HTML, CSS y JavaScript nativo servidos directamente desde `public/`.
 
 | Capa | Tecnología |
 |---|---|
 | Servidor | Node.js (`node:http`, `node:sqlite`) |
-| Inferencia local | `@qvac/sdk` — Qwen3 4B Q4_K_M, Whisper small Q8_0, EasyOCR |
+| Inferencia local | `@qvac/sdk` — Qwen3 4B, Whisper small, EasyOCR |
 | Validación | `zod` |
-| Imágenes | `sharp` (ampliación local previa al OCR) |
-| Mapa | `leaflet` + tiles de OpenStreetMap |
-| Persistencia | SQLite (`data/sitesignal.db`) |
-
-Hardware de referencia probado: AMD Ryzen 7 8845HS (8 núcleos físicos / 16 lógicos), 16 GB RAM, GPU integrada AMD Radeon 780M — toda la inferencia sobre CPU. La pantalla **Entorno** declara el hardware detectado en cada equipo donde se ejecute.
+| Imágenes | `sharp` |
+| Mapa | `leaflet` + OpenStreetMap |
 
 ## Más recursos
 
