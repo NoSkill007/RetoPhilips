@@ -9,6 +9,7 @@ import { regionalPanorama } from './regional-panorama.js';
 import { naturalQuery } from './natural-query.js';
 import { opportunities, opportunityReviewSchema } from './opportunities.js';
 import { evidenceStore } from './evidence.js';
+import { coordinatesFor } from './geo.js';
 
 const followUpAnswerSchema = z.object({ answer: z.union([z.string().trim().min(1).max(300), z.number(), z.null()]) }).strict();
 const duplicateDecisionSchema = z.object({ decision: z.enum(['keep-separate', 'consolidate']) }).strict();
@@ -199,7 +200,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       return opportunity.decide(itemId, hospitalId, input.decision, input.note, profile(String(active.value)));
     }
     if (path === '/api/drafts' && method === 'POST') {
-      const { text, source: channel } = captureSchema.parse(body);
+      const { text, source: channel, manual: manualRequested } = captureSchema.parse(body);
       const capturedAt = now().toISOString();
       const active = db.prepare("SELECT value FROM preferences WHERE key = 'activeProfile'").get();
       if (!active) throw new RequestError(409, 'Crea y selecciona un perfil de colaborador antes de capturar.');
@@ -209,7 +210,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       let bestResult;
       let attempts = 0;
       let correctiveInstruction = 'Respeta la estructura completa del schema. Devuelve null JSON real para datos ausentes, nunca textos como "null" o "no specified". Copia cada valor no nulo literalmente, sin cambiar singular o plural. No inventes una cantidad al dividir un grupo.';
-      for (attempts = 1; attempts <= 2; attempts += 1) {
+      for (attempts = 1; !manualRequested && attempts <= 2; attempts += 1) {
         try {
           const extraction = await extractText(text, { attempt: attempts,
             ...(attempts === 2 ? { correctiveInstruction } : {}) });
@@ -234,14 +235,14 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       if (!validResult && bestResult?.reviewed.hospital && bestResult.reviewed.equipment.some(item => item.modality !== null)) {
         validResult = bestResult; attempts = 2;
       }
-      const manual = !validResult;
+      const manual = manualRequested || !validResult;
       const reviewed = validResult?.reviewed ?? { client: null, hospital: null, area: null, equipment: [
         { modality: null, quantity: null, manufacturer: null, model: null, serial: null, age: null },
       ] };
       const issues = [...new Set(validResult ? validResult.issues : validationIssues)];
       const provenance = validResult
         ? { kind: 'qvac', channel, metadata: validResult.inference, attempts, retryCorrected: attempts === 2, partial: validResult.issues.length > 0, validationIssues: issues }
-        : { kind: 'manual', channel, attempts: 2, validationIssues: issues };
+        : { kind: 'manual', channel, attempts: manualRequested ? 0 : 2, validationIssues: issues };
       const draft = { id: randomUUID(), originalText: text, reviewed,
         extracted: validResult?.cleanedFields ?? null, profile: collaborator, provenance, capturedAt, followUpHistory: [] };
       db.prepare('INSERT INTO drafts VALUES (?, ?)').run(draft.id, JSON.stringify(draft));
@@ -290,7 +291,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       const installedBaseData = base.present(id);
       const observationRows = db.prepare('SELECT data FROM observations WHERE hospital_id = ? ORDER BY rowid DESC').all(id).map(row => JSON.parse(String(row.data)));
       const opportunityList = opportunitiesForHospital(id, installedBaseData.items, installedBaseData.conflicts, observationRows);
-      return { ...hospital, installedBase: { ...installedBaseData, opportunities: opportunityList }, observations: observationRows.map(observation => presentObservation(observation)) };
+      return { ...hospital, coordinates: coordinatesFor(String(hospital.city ?? ''), String(hospital.country ?? '')), installedBase: { ...installedBaseData, opportunities: opportunityList }, observations: observationRows.map(observation => presentObservation(observation)) };
     }
     if (path === '/api/observations' && method === 'POST') {
       const input = saveSchema.parse(body);

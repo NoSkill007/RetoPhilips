@@ -24,7 +24,7 @@ export const inferenceSchema = z.object({ engine: z.string(), model: z.string(),
 export const profileSchema = z.object({ name: z.string().trim().min(1).max(80), role: z.enum(roles) }).strict();
 export const activeSchema = z.object({ profileId: z.uuid() }).strict();
 export const captureSchema = z.object({ text: z.string().max(8000).refine(value => value.trim().length >= 5),
-  source: z.enum(['text', 'voice']).default('text') }).strict();
+  source: z.enum(['text', 'voice']).default('text'), manual: z.boolean().default(false) }).strict();
 export const saveSchema = z.object({
   draftId: z.uuid(), reviewed: reviewedSchema, hospitalId: z.uuid().nullable(), splitGroupId: z.uuid().nullable().optional(),
   evidenceIds: z.array(z.uuid()).max(10).optional(),

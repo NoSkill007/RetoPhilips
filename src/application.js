@@ -1,7 +1,8 @@
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { extname, join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { observationApi } from './observations.js';
@@ -30,19 +31,21 @@ export async function startApplication({ dataDirectory, port, probeQvac, qvacSta
   const plateProbe = Promise.resolve().then(probePlate).then(result => { plate = result; }).catch(() => {
     plate = { state: 'unavailable', message: 'No se pudo comprobar el modelo de evidencia fotográfica. Revisa la preparación y reinicia.' };
   });
-  const assets = new Map([
-    ['/', ['index.html', 'text/html; charset=utf-8']],
-    ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
-    ['/style.css', ['style.css', 'text/css; charset=utf-8']],
-    ['/capture.js', ['capture.js', 'text/javascript; charset=utf-8']],
-    ['/panorama.js', ['panorama.js', 'text/javascript; charset=utf-8']],
-    ['/voice.js', ['voice.js', 'text/javascript; charset=utf-8']],
-    ['/evidence.js', ['evidence.js', 'text/javascript; charset=utf-8']],
-  ]);
+  const publicDirectory = resolve(fileURLToPath(new URL('../public/', import.meta.url)));
+  const leafletDirectory = resolve(fileURLToPath(new URL('../node_modules/leaflet/dist/', import.meta.url)));
+  const mime = new Map(Object.entries({ '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.ico': 'image/x-icon' }));
+  /** @param {string} root @param {string} pathname */
+  function safePath(root, pathname) {
+    let decoded;
+    try { decoded = decodeURIComponent(pathname); } catch { return null; }
+    if (decoded.includes('\0') || decoded.split(/[\\/]+/).includes('..')) return null;
+    const target = resolve(root, decoded.replace(/^[/\\]+/, ''));
+    return target === root || target.startsWith(root + sep) ? target : null;
+  }
   const server = createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
-    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'");
+    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: https://*.tile.openstreetmap.org; frame-ancestors 'none'");
     if (request.url === '/api/status' && request.method === 'GET') {
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({ api: { state: 'ready', message: 'API local disponible' }, database: {
@@ -122,11 +125,15 @@ export async function startApplication({ dataDirectory, port, probeQvac, qvacSta
       return;
     }
     if (request.method !== 'GET') { response.writeHead(405).end(); return; }
-    const asset = assets.get(request.url ?? '');
-    if (!asset) { response.writeHead(404).end(); return; }
+    const pathname = new URL(request.url ?? '/', 'http://sitesignal.local').pathname;
+    const isVendor = pathname.startsWith('/vendor/leaflet/');
+    const relativePath = pathname === '/' ? '/index.html' : isVendor ? pathname.slice('/vendor/leaflet'.length) : pathname;
+    if (isVendor && !/^\/(leaflet\.(?:js|css)|images\/[a-z0-9@._-]+)$/i.test(relativePath)) { response.writeHead(404).end(); return; }
+    const asset = safePath(isVendor ? leafletDirectory : publicDirectory, relativePath);
+    if (!asset || !mime.has(extname(asset).toLowerCase())) { response.writeHead(404).end(); return; }
     try {
-      const contents = await readFile(new URL('../public/' + asset[0], import.meta.url));
-      response.setHeader('Content-Type', asset[1]);
+      const contents = await readFile(asset);
+      response.setHeader('Content-Type', mime.get(extname(asset).toLowerCase()) ?? 'application/octet-stream');
       response.end(contents);
     } catch { response.writeHead(500).end('No se pudo abrir la interfaz local. Revisa los archivos de instalación.'); }
   });

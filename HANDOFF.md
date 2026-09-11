@@ -151,6 +151,19 @@ Corrección: el umbral numérico de coincidencias se reemplazó por una regla ba
 
 Sobre "un sistema de validación para las que ya se habían creado pero les faltó data": esto ya existía por dos caminos independientes, verificados de nuevo en esta sesión — (1) consolidar un candidato de duplicado ya rellena los campos vacíos de un lado con el valor del otro (`value = left[field] ?? right[field] ?? null` en `decideDuplicate`), y (2) la corrección manual (`POST /api/installed-equipment/:id/corrections`, sección "Corregir un dato" del perfil 360) no tiene ninguna restricción que impida completar fabricante/modelo/edad en un grupo sin serie — solo el propio número de serie exige separar primero una unidad individual, por ser el campo usado para identidad fuerte.
 
+## Rediseño multipantalla de UI/UX
+
+El 11 de septiembre de 2026 se reemplazó la página apilada por cuatro pantallas responsive: `#/panorama`, `#/capturar`, `#/hospitales` (con detalle `#/hospitales/:id`) y `#/entorno`. La interfaz usa identidad azul de SiteSignal, navegación lateral en escritorio, barra inferior en móvil y modo oscuro automático. Panorama integra Leaflet servido localmente y teselas opcionales de OpenStreetMap; las coordenadas se resuelven con `src/geo.js` y nunca mediante geocodificación externa. Captura se presenta como asistente, Hospitales incorpora buscador y pestañas de perfil 360, y Entorno agrupa diagnósticos, exportaciones y restauración del demo.
+
+Verificación del rediseño: 98/98 pruebas (incluye `test/geo.test.js`, nuevo), `npm run typecheck` y `git diff --check` aprobados. Se revisaron visualmente Panorama, Capturar, Hospitales, Perfil 360 y Entorno en el navegador integrado a 375px, 768px y escritorio, incluido el modo oscuro, y se completó un ciclo real con QVAC (crear perfil, escribir relato, extraer, revisar, guardar y ver el hospital nuevo en el mapa). El asistente separa Perfil, Relato, Revisión y Guardado; adapta texto, voz e imagen al estado real de QVAC y ofrece captura manual inmediata cuando el modelo textual no está disponible.
+
+Dos correcciones encontradas durante esta verificación visual:
+
+- El mapa de `public/panorama.js` inicializaba Leaflet con `L.map()` y llamaba `fitBounds()` sin `invalidateSize()` antes; si el contenedor no tenía todavía su tamaño final en ese momento (layout aún resolviéndose), Leaflet calculaba mal la proyección y el mapa quedaba encuadrado sobre un punto arbitrario muy alejado en vez de mostrar toda la región. Se agregó `map.invalidateSize()` justo antes de `fitBounds()`/`setView()` en `renderMap()`.
+- `feedback()` en `public/capture.js` y el manejo de error en `public/panorama.js` reemplazaban por completo el `className` del `<p id="feedback">` (`el('feedback').className = 'ready'` / `'unavailable'`), perdiendo la clase `sr-only` que lo mantiene invisible; el mensaje de estado, pensado para convertirse en un toast flotante vía el `MutationObserver` de `public/router.js`, quedaba en cambio como un banner fijo y visible en la parte superior de cada pantalla. Corregido para conservar `sr-only` (`className = 'sr-only ready'` / `'sr-only unavailable'`) en ambos archivos.
+
+Nota para quien retome pruebas visuales: el navegador reutiliza en caché los módulos ES de `public/*.js` entre navegaciones dentro de la misma pestaña incluso con `Cache-Control: no-store`; si un cambio en un archivo `.js` no se refleja tras recargar, cierra la pestaña del navegador integrado y ábrela de nuevo en vez de solo navegar.
+
 ## Próximo trabajo
 
 El backlog original de tickets está completo (#2 a #14), y las tres brechas menores de la auditoría contra el brief quedaron cerradas. Cualquier trabajo adicional (cifrado, autenticación, empaquetado como instalador, región en consultas de lenguaje natural, etc.) queda fuera del alcance de este prototipo de hackathon — ver "Garantías del prototipo frente a requisitos de producción" en `README.md`.

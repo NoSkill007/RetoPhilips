@@ -4,11 +4,11 @@ Todo el guion usa datos ficticios. Ejecuta `npm start` (o `Start-SiteSignal.ps1`
 
 ## 0. Apertura (30 s)
 
-"SiteSignal es un prototipo que convierte lo que un ingeniero de servicio observa en una visita en una base instalada consultable, usando inteligencia local con QVAC. No hay nube: todo el modelo corre en esta computadora." Señala la sección "Estado del entorno" al final de la página: los tres modelos (texto, voz, evidencia fotográfica) están "Disponible", con el hardware local declarado.
+"SiteSignal convierte lo que un colaborador observa en una visita en inteligencia confiable sobre la base instalada, usando QVAC local." Abre la pantalla **Entorno** desde la navegación y muestra los tres modelos disponibles junto al hardware local.
 
 ## 1. Captura escrita y revisión (90 s)
 
-En "Registrar una visita", escribe (o pega):
+Abre **Capturar**. Comprueba el perfil activo y, en el paso Relato, escribe (o pega):
 
 > Visité Hospital Aurora del cliente Red Horizonte. Vi un tomógrafo DemoMed Ficticio, modelo XR-3000, número de serie FIC-000123 y ocho años.
 
@@ -24,11 +24,11 @@ En "Dictar la observación", elige español, graba una frase corta ficticia (p. 
 
 ## 4. Panorama regional y consulta natural (60 s)
 
-Ve a "Panorama regional". Escribe en el cuadro de pregunta: "Muéstrame hospitales de Panamá con equipos de más de siete años" y pulsa "Interpretar con QVAC". Muestra los filtros visibles resultantes y aclara: "QVAC solo interpreta filtros; nunca genera ni ejecuta SQL." Haz clic en un hospital del mapa para navegar a su perfil 360.
+Ve a **Panorama**. Escribe: "Muéstrame hospitales de Panamá con equipos de más de siete años" y pulsa "Interpretar". Muestra los filtros visibles y el mapa real. Aclara: "QVAC solo interpreta filtros; nunca genera ni ejecuta SQL." Abre un marcador y entra al perfil 360.
 
 ## 5. Exportación y cierre (45 s)
 
-Baja a "Estado del entorno" y pulsa "Exportar base instalada (CSV)" y "Exportar observaciones y evidencia (JSON)". Abre brevemente el CSV: "esta es la base instalada capturada, lista para análisis externo." Cierra con: "Todo lo mostrado —captura, voz, evidencia, panorama y exportación— corrió sin salir de esta computadora."
+Abre **Entorno** y usa las dos exportaciones. Cierra con: "Toda la inteligencia mostrada —texto, voz, evidencia, panorama y exportación— se procesó en esta computadora; OpenStreetMap solo aporta el fondo cartográfico opcional."
 
 ## Notas para quien presenta
 

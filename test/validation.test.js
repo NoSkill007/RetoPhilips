@@ -64,6 +64,16 @@ test('dos fallos abren captura manual sin perder el relato y distinguen la proce
   } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
 });
 
+test('la captura manual explícita conserva el relato sin invocar QVAC', async () => {
+  let calls = 0;
+  const context = await scenario(async () => { calls += 1; throw new Error('no debe ejecutarse'); });
+  try {
+    const draft = await context.post('/api/drafts', { text: source, manual: true });
+    assert.equal(calls, 0); assert.equal(draft.provenance.kind, 'manual'); assert.equal(draft.provenance.attempts, 0);
+    assert.equal(draft.originalText, source); assert.equal(draft.reviewed.hospital, null);
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});
+
 test('modalidades y afirmaciones sin respaldo se rechazan visiblemente', async () => {
   const unsupportedSource = 'Visité Hospital Aurora. Vi dos teletransportadores.';
   const claims = { client: 'Aurora', hospital: 'Hospital Aurora', area: null, equipment: [

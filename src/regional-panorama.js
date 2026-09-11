@@ -3,14 +3,14 @@ import { assessObservation } from './confidence.js';
 import { modalities } from './observation-schema.js';
 import { opportunities, isStale } from './opportunities.js';
 import { regionFor } from './region.js';
+import { coordinatesFor } from './geo.js';
 
 const DATASET_ID = 'sitesignal-fictional-latam-v3';
 /** Fixed to the original 7-category catalog so the deterministic demo dataset (and its documented
  * natural-query scenarios) stays stable as the full modality catalog grows. */
 const demoModalities = ['Resonancia magnética', 'Tomografía computarizada', 'Ultrasonido', 'Monitoreo de pacientes', 'Rayos X', 'Sistema intervencionista', 'Otro'];
-/** The regional map only draws shapes for these three countries; the two entries beyond them
- * (México, Chile) exist to demonstrate that a hospital works fully everywhere else — filters, lists,
- * aggregations, hospital 360 — even without a clickable shape on the map itself. */
+/** Fictitious regional demo hospitals. Every location is resolved through the local coordinate
+ * catalog before it reaches the map; no online geocoding is used. */
 const hospitals = [
   ['Red Istmo Ficticia', 'Hospital Brisa Ficticio', 'Panamá', 'Ciudad de Panamá'],
   ['Red Istmo Ficticia', 'Hospital Canal Ficticio', 'Panamá', 'Ciudad de Panamá'],
@@ -144,8 +144,12 @@ export function regionalPanorama(db, now = () => new Date()) {
       if (record.age >= 7 && record.confidence >= 60 && !stale(record, now()) && !record.hasConflict) current.potentialOpportunities += 1;
       hospitalRows.set(record.hospitalId, current);
     }
-    const summaries = [...hospitalRows.values()].map(item => ({ ...item, averageConfidence: Math.round(item.confidenceTotal / item.equipmentCount), confidenceTotal: undefined })).sort((a, b) => a.name.localeCompare(b.name, 'es'));
-    const countries = aggregate(filtered.filter(record => ['Panamá', 'Brasil', 'Colombia'].includes(record.country)), record => record.country).map(item => ({ country: item.value, equipment: item.count, hospitals: new Set(filtered.filter(record => record.country === item.value).map(record => record.hospitalId)).size }));
+    const pendingCounts = new Map();
+    for (const table of ['installed_base_conflicts', 'duplicate_candidates']) {
+      for (const row of db.prepare(`SELECT hospital_id, COUNT(*) AS count FROM ${table} WHERE status = 'pending' GROUP BY hospital_id`).all()) pendingCounts.set(row.hospital_id, (pendingCounts.get(row.hospital_id) ?? 0) + Number(row.count));
+    }
+    const summaries = [...hospitalRows.values()].map(item => ({ ...item, coordinates: coordinatesFor(item.city, item.country), pendingCount: pendingCounts.get(item.id) ?? 0, averageConfidence: Math.round(item.confidenceTotal / item.equipmentCount), confidenceTotal: undefined })).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    const countries = aggregate(filtered, record => record.country).map(item => ({ country: item.value, equipment: item.count, hospitals: new Set(filtered.filter(record => record.country === item.value).map(record => record.hospitalId)).size }));
     return {
       dataset: dataset(), selected: { ...selected, minAge: minAge ?? '', maxAge: maxAge ?? '' },
       filters: {
@@ -186,7 +190,7 @@ export function regionalPanorama(db, now = () => new Date()) {
       itemId: record.id, hospitalId: id, modality: record.modality, manufacturer: record.manufacturer, model: record.model, serial: record.serial,
       age: record.age, confidence: record.assessment.confidence.score, capturedAt: record.capturedAt, hasIdentityConflict: false, supportingObservationIds: [record.id],
     }));
-    return { id, name: first.hospital, client: first.client, region: first.region, country: first.country, city: first.city, fictional: true, dataset: dataset(), installedBase: { total: 6, items, duplicateCandidates: [], conflicts: [], conflictHistory: [], changeHistory: [], opportunities: opportunityList }, observations };
+    return { id, name: first.hospital, client: first.client, region: first.region, country: first.country, city: first.city, coordinates: coordinatesFor(first.city, first.country), fictional: true, dataset: dataset(), installedBase: { total: 6, items, duplicateCandidates: [], conflicts: [], conflictHistory: [], changeHistory: [], opportunities: opportunityList }, observations };
   }
   /** @param {string} method @param {string} path */
   async function handle(method, path) {

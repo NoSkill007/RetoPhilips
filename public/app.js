@@ -19,6 +19,7 @@ async function refresh() {
     const response = await fetch('/api/status', { signal: AbortSignal.timeout(5000) });
     if (!response.ok) throw new Error('API no disponible');
     const status = await response.json();
+    window.dispatchEvent(new CustomEvent('sitesignal:status', { detail: status }));
     for (const key of ['api', 'database', 'qvac', 'voice', 'plate']) {
       element(key + '-state').textContent = labels[status[key].state] ?? 'Desconocido';
       element(key + '-state').className = status[key].state;
@@ -29,6 +30,7 @@ async function refresh() {
     element('summary').textContent = status.qvac.state === 'ready' ? 'El entorno local está disponible.' : 'La aplicación está abierta. Revisa el estado de la inteligencia local.';
     element('installation').textContent = `Instalación ${status.database.installationId} · Arranques: ${status.database.starts}`;
   } catch {
+    window.dispatchEvent(new CustomEvent('sitesignal:status', { detail: { qvac: { state: 'unavailable', message: 'QVAC de texto no está disponible.' }, voice: { state: 'unavailable', message: 'QVAC de voz no está disponible.' }, plate: { state: 'unavailable', message: 'QVAC de imagen no está disponible.' } } }));
     element('summary').textContent = 'No hay conexión con la aplicación local. Ejecuta Start-SiteSignal.ps1 y vuelve a actualizar.';
     for (const key of ['api', 'database', 'qvac', 'voice', 'plate']) {
       element(key + '-state').textContent = key === 'api' ? 'No disponible' : 'Sin verificar';
@@ -43,4 +45,3 @@ async function refresh() {
 element('refresh').addEventListener('click', refresh);
 refresh();
 setInterval(refresh, 5000);
-

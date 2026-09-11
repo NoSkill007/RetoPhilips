@@ -47,10 +47,9 @@ test('agrega equipos, confianza, vigencia, edad, modalidad y geografía', async 
     assert.ok(data.filters.modalities.includes('Otro'));
     assert.ok(data.aggregations.confidence.every(/** @param {any} item */ item => ['Baja (0–49)', 'Media (50–79)', 'Alta (80–100)'].includes(item.value)));
     assert.deepEqual(data.aggregations.region.map(/** @param {any} region */ region => region.value), ['América Latina']);
-    // the map only draws the three main countries; the two hospitals outside it (México, Chile) still
-    // count in every other total above, but are excluded here and from the map/legend widget itself.
-    assert.deepEqual(data.map.map(/** @param {any} country */ country => country.country).sort(), ['Brasil', 'Colombia', 'Panamá']);
-    assert.equal(data.map.reduce(/** @param {number} sum @param {any} country */ (sum, country) => sum + country.equipment, 0), 60);
+    assert.deepEqual(data.map.map(/** @param {any} country */ country => country.country).sort(), ['Brasil', 'Chile', 'Colombia', 'México', 'Panamá']);
+    assert.equal(data.map.reduce(/** @param {number} sum @param {any} country */ (sum, country) => sum + country.equipment, 0), 72);
+    assert.ok(data.hospitals.every(/** @param {any} hospital */ hospital => hospital.coordinates?.precision === 'city'));
   } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
 });
 

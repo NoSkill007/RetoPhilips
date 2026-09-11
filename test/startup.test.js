@@ -39,8 +39,22 @@ test('modelo ausente mantiene interfaz y API con instrucciones de recuperación'
     const page = await fetch(app.url);
     assert.equal(page.status, 200);
     assert.match(await page.text(), /SiteSignal/);
-    assert.equal((await fetch(app.url + '/style.css')).status, 200);
+    assert.equal((await fetch(app.url + '/styles/tokens.css')).status, 200);
     assert.equal((await fetch(app.url + '/app.js')).status, 200);
+  } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('sirve la interfaz multipantalla y Leaflet sin exponer rutas fuera de sus directorios', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sitesignal-'));
+  const app = await startApplication({ dataDirectory: directory, port: 0, probeQvac: async () => ({ state: 'ready', message: 'Listo' }) });
+  try {
+    const page = await fetch(app.url);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-security-policy') ?? '', /https:\/\/\*\.tile\.openstreetmap\.org/);
+    assert.equal((await fetch(app.url + '/styles/tokens.css')).status, 200);
+    assert.equal((await fetch(app.url + '/vendor/leaflet/leaflet.js')).status, 200);
+    assert.equal((await fetch(app.url + '/%2e%2e%2fpackage.json')).status, 404);
+    assert.equal((await fetch(app.url + '/vendor/leaflet/%2e%2e%2fpackage.json')).status, 404);
   } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
 });
 

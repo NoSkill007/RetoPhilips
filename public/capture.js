@@ -6,7 +6,7 @@ function select(id) { const result = el(id); if (!(result instanceof HTMLSelectE
 /** @param {string} id */
 function form(id) { const result = el(id); if (!(result instanceof HTMLFormElement)) throw new Error(id); return result; }
 /** @param {string} text @param {boolean} [error] */
-function feedback(text, error = false) { el('feedback').textContent = text; el('feedback').className = error ? 'unavailable' : 'ready'; }
+function feedback(text, error = false) { el('feedback').textContent = text; el('feedback').className = `sr-only ${error ? 'unavailable' : 'ready'}`; }
 /** @param {string} path @param {unknown} [body] */
 async function api(path, body) {
   const response = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -20,10 +20,14 @@ function report(error) { feedback(error instanceof Error ? error.message : 'No s
 function option(target, value, text) { const item = document.createElement('option'); item.value = value; item.textContent = text; target.append(item); }
 /** @param {string} tag @param {string} text */
 function node(tag, text) { const result = document.createElement(tag); result.textContent = text; return result; }
+/** @param {string} text @param {'base'|'observations'|'pending'|'opportunities'|'history'} section */
+function sectionHeading(text, section) { const result = node('h3', text); result.setAttribute('data-hospital-section', section); return result; }
 /** @type {any} */
 let draft = null;
 /** @type {any[]} */
 let hospitals = [];
+/** @type {{qvac?: {state:string,message?:string}, voice?: {state:string,message?:string}, plate?: {state:string,message?:string}}} */
+let serviceStatus = {};
 /** Evidence photos attached to the equipment cards of the draft currently under review; sent as
  * `evidenceIds` when the observation is saved. Reset whenever a fresh draft replaces the current one. */
 let attachedEvidenceIds = /** @type {string[]} */ ([]);
@@ -34,7 +38,9 @@ async function loadProfiles() {
   const data = await api('/api/profiles');
   const target = select('profile'); target.replaceChildren(); option(target, '', 'Selecciona un perfil');
   for (const profile of data.profiles) option(target, profile.id, `${profile.name} · ${profile.role}`);
-  target.value = data.activeProfileId ?? '';
+  target.value = data.activeProfileId ?? localStorage.getItem('sitesignal:profile') ?? '';
+  if (target.value) localStorage.setItem('sitesignal:profile', target.value);
+  window.dispatchEvent(new CustomEvent('sitesignal:profile-ready', { detail: target.value }));
 }
 form('profile-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -46,7 +52,7 @@ form('profile-form').addEventListener('submit', async event => {
   } catch (error) { report(error); }
 });
 select('profile').addEventListener('change', async () => {
-  try { await api('/api/profiles/active', { profileId: select('profile').value }); feedback('Perfil activo actualizado. Los borradores conservan su autor original.'); }
+  try { await api('/api/profiles/active', { profileId: select('profile').value }); localStorage.setItem('sitesignal:profile', select('profile').value); window.dispatchEvent(new CustomEvent('sitesignal:profile-ready', { detail: select('profile').value })); feedback('Perfil activo actualizado. Los borradores conservan su autor original.'); }
   catch (error) { report(error); await loadProfiles(); }
 });
 
@@ -76,6 +82,10 @@ function addCard(equipment) {
   evidenceInput.setAttribute('capture', 'environment');
   const evidenceButton = document.createElement('button'); evidenceButton.type = 'button'; evidenceButton.textContent = 'Analizar foto con QVAC';
   const evidenceFeedback = document.createElement('p'); evidenceFeedback.className = 'hint';
+  if (serviceStatus.plate?.state === 'unavailable') {
+    evidenceInput.disabled = true; evidenceButton.disabled = true;
+    evidenceFeedback.textContent = serviceStatus.plate.message || 'El análisis de imágenes no está disponible. Puedes completar los campos manualmente.';
+  }
   evidenceButton.addEventListener('click', async () => {
     const file = evidenceInput.files?.[0];
     if (!file) { evidenceFeedback.textContent = 'Selecciona una foto primero.'; return; }
@@ -95,7 +105,7 @@ function addCard(equipment) {
       const found = [manufacturer && 'fabricante', model && 'modelo', serial && 'número de serie', year && 'año'].filter(Boolean);
       evidenceFeedback.textContent = found.length ? `Detectado y aplicado: ${found.join(', ')}. Texto leído: “${result.ocrText}”.` : `No se detectó ningún campo con respaldo suficiente. Texto leído: “${result.ocrText || 'ninguno'}”.`;
     } catch (error) { evidenceFeedback.textContent = error instanceof Error ? error.message : 'No se pudo analizar la foto.'; }
-    finally { evidenceButton.disabled = false; }
+    finally { evidenceButton.disabled = serviceStatus.plate?.state === 'unavailable'; }
   });
   evidenceForm.append(evidenceInput, evidenceButton, evidenceFeedback); card.append(evidenceForm);
   const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Quitar tarjeta';
@@ -165,10 +175,12 @@ function renderReview() {
   option(target, 'new', 'Crear un hospital con los datos revisados');
   for (const hospital of hospitals) option(target, hospital.id, `${draft.candidates.some(/** @param {{id: string}} c */ c => c.id === hospital.id) ? 'Posible coincidencia · ' : ''}${hospital.name} · ${hospital.client ?? 'Cliente desconocido'}`);
   target.value = draft.candidates.length ? '' : 'new';
+  const preferredHospital = localStorage.getItem('sitesignal:targetHospital');
+  if (preferredHospital && hospitals.some(hospital => hospital.id === preferredHospital)) { target.value = preferredHospital; localStorage.removeItem('sitesignal:targetHospital'); target.dispatchEvent(new Event('change')); }
   renderSplitGroups(null);
   const notice = el('validation-notice'); notice.replaceChildren();
   if (draft.provenance.kind === 'manual') {
-    notice.hidden = false; notice.append(node('h3', 'Captura manual activada'), node('p', 'QVAC falló dos veces. El relato original está intacto; completa solo los datos que puedas revisar.'));
+    notice.hidden = false; notice.append(node('h3', 'Captura manual activada'), node('p', draft.provenance.attempts === 0 ? 'El modelo de texto no está disponible. Tu relato está intacto; completa solo los datos que puedas revisar.' : 'QVAC falló dos veces. El relato original está intacto; completa solo los datos que puedas revisar.'));
   } else if (draft.provenance.partial) {
     notice.hidden = false; notice.append(node('h3', 'Extracción parcial segura'), node('p', 'Tras dos intentos, SiteSignal conservó únicamente los datos respaldados por el relato. Completa o corrige los campos vacíos antes de guardar.'));
   } else if (draft.provenance.retryCorrected) {
@@ -208,20 +220,24 @@ select('hospital-choice').addEventListener('change', async () => {
   }
   try { await renderSplitGroups(hospital?.id ?? null); } catch (error) { report(error); }
 });
-form('capture-form').addEventListener('submit', async event => {
-  event.preventDefault();
+/** @param {boolean} manual */
+async function createDraft(manual) {
   const input = el('observation'); if (!(input instanceof HTMLTextAreaElement)) return;
   if (!select('profile').value) { feedback('Crea y selecciona un perfil de colaborador.', true); return; }
   const button = el('extract'); if (!(button instanceof HTMLButtonElement)) return;
   button.disabled = true; input.readOnly = true; el('review').hidden = true; draft = null; attachedEvidenceIds = [];
-  feedback('QVAC está leyendo tu observación en esta computadora…');
+  feedback(manual ? 'Preparando la revisión manual…' : 'QVAC está leyendo tu observación en esta computadora…');
   try {
-    draft = await api('/api/drafts', { text: input.value, source: input.dataset.source === 'voice' ? 'voice' : 'text' });
+    draft = await api('/api/drafts', { text: input.value, source: input.dataset.source === 'voice' ? 'voice' : 'text', manual });
     hospitals = await api('/api/hospitals'); renderReview();
     feedback(draft.provenance.kind === 'manual' ? 'QVAC falló dos veces. Completa la captura manual sin perder tu relato.' : 'Extracción lista. Revisa los datos antes de guardarlos.', draft.provenance.kind === 'manual');
   } catch (error) { report(error); }
   finally { button.disabled = false; input.readOnly = false; }
+}
+form('capture-form').addEventListener('submit', async event => {
+  event.preventDefault(); await createDraft(false);
 });
+el('manual-capture').addEventListener('click', () => createDraft(true));
 el('observation').addEventListener('input', () => { if (draft) { draft = null; attachedEvidenceIds = []; el('review').hidden = true; feedback('El texto cambió. Vuelve a extraer para revisar la nueva versión.'); } });
 // A real keystroke (unlike voice.js's programmatic fill, which only dispatches "input") means the
 // collaborator is now typing by hand — the capture channel reverts from "voice" to "text" accordingly.
@@ -249,19 +265,18 @@ form('review-form').addEventListener('submit', async event => {
       splitGroupId: select('split-group-choice').value || null,
       evidenceIds: attachedEvidenceIds.length ? attachedEvidenceIds : undefined });
     draft = null; attachedEvidenceIds = []; el('review').hidden = true; form('capture-form').reset();
-    await loadHospitals(); await showHospital(saved.hospitalId); window.dispatchEvent(new CustomEvent('sitesignal:panorama-refresh')); feedback('Observación guardada con su texto original y procedencia.');
-    el('hospital-view').scrollIntoView({ behavior: 'smooth' });
+    await loadHospitals(); window.dispatchEvent(new CustomEvent('sitesignal:panorama-refresh')); window.dispatchEvent(new CustomEvent('sitesignal:directory-refresh')); feedback('Observación guardada con su texto original y procedencia.');
+    el('capture').hidden = true; el('capture-success').hidden = false;
+    el('saved-summary').textContent = `${saved.reviewed.hospital} · ${saved.reviewed.equipment.length} registro${saved.reviewed.equipment.length === 1 ? '' : 's'} de equipo · Confianza ${saved.assessment.confidence.score}%`;
+    el('saved-hospital-link').setAttribute('href', `#/hospitales/${saved.hospitalId}`);
+    for (const step of document.querySelectorAll('[data-step-link]')) { step.classList.toggle('active', step.getAttribute('data-step-link') === '4'); step.classList.toggle('complete', Number(step.getAttribute('data-step-link')) < 4); }
+    location.hash = '#/capturar'; el('capture-success').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) { report(error); }
   finally { button.disabled = false; }
 });
 
 async function loadHospitals() {
-  hospitals = await api('/api/hospitals'); el('hospital-list').replaceChildren();
-  if (!hospitals.length) el('hospital-list').append(node('p', 'Todavía no hay hospitales. Guarda tu primera observación para comenzar.'));
-  for (const hospital of hospitals) {
-    const button = document.createElement('button'); button.textContent = `${hospital.name} · ${hospital.client ?? 'Cliente desconocido'}`;
-    button.addEventListener('click', () => showHospital(hospital.id).catch(report)); el('hospital-list').append(button);
-  }
+  hospitals = await api('/api/hospitals');
 }
 /** @param {string} hospitalId @param {string} candidateId @param {'keep-separate' | 'consolidate'} decision */
 async function decideDuplicate(hospitalId, candidateId, decision) {
@@ -325,8 +340,8 @@ function opportunityCard(signal, actionable) {
 async function showHospital(id) {
   const hospital = await api('/api/hospitals/' + id); const target = el('hospital-view'); target.replaceChildren();
   target.append(node('h2', `Perfil 360 · ${hospital.name}`), node('p', `Cliente: ${hospital.client ?? 'Desconocido'}`));
-  if (!hospital.fictional) target.append(node('p', `Ubicación: ${hospital.city ?? 'Ciudad desconocida'}, ${hospital.country ?? 'País desconocido'} · Región: ${hospital.region ?? 'Desconocida'}`));
-  target.append(node('h3', `Base instalada · ${hospital.installedBase.total} equipos reportados`));
+  target.append(node('p', `Ubicación: ${hospital.city ?? 'Ciudad desconocida'}, ${hospital.country ?? 'País desconocido'} · Región: ${hospital.region ?? 'Desconocida'} · Origen: ${hospital.fictional ? 'Dataset sintético ficticio' : 'Captura local'}`));
+  target.append(sectionHeading(`Base instalada · ${hospital.installedBase.total} equipos reportados`, 'base'));
   const base = document.createElement('div'); base.className = 'installed-base';
   if (!hospital.installedBase.items.length) base.append(node('p', 'Todavía no hay equipos representados.'));
   for (const item of hospital.installedBase.items) {
@@ -351,7 +366,7 @@ async function showHospital(id) {
   }
   target.append(base);
   if (hospital.installedBase.conflicts.length) {
-    target.append(node('h3', 'Conflictos pendientes'));
+    target.append(sectionHeading('Conflictos pendientes', 'pending'));
     for (const conflict of hospital.installedBase.conflicts) {
       const conflictCard = document.createElement('article'); conflictCard.className = 'pending-conflict';
       const label = Object.fromEntries(equipmentFields)[conflict.field] ?? conflict.field;
@@ -365,7 +380,7 @@ async function showHospital(id) {
     }
   }
   if (hospital.installedBase.duplicateCandidates.length) {
-    target.append(node('h3', 'Candidatos a duplicado pendientes'));
+    target.append(sectionHeading('Candidatos a duplicado pendientes', 'pending'));
     /** @type {Record<string, string>} */
     const labels = { hospital: 'Hospital', modality: 'Modalidad', manufacturer: 'Fabricante', model: 'Modelo', quantity: 'Cantidad', age: 'Antigüedad aproximada', serial: 'Número de serie' };
     for (const candidate of hospital.installedBase.duplicateCandidates) {
@@ -392,7 +407,7 @@ async function showHospital(id) {
     }
   }
   if (hospital.installedBase.opportunities.length) {
-    target.append(node('h3', 'Oportunidades potenciales de renovación'));
+    target.append(sectionHeading('Oportunidades potenciales de renovación', 'opportunities'));
     target.append(node('p', 'Señal explicable, no una recomendación definitiva: revisa las condiciones antes de actuar.'));
     const current = hospital.installedBase.opportunities.filter(/** @param {any} signal */ signal => signal.current);
     const other = hospital.installedBase.opportunities.filter(/** @param {any} signal */ signal => !signal.current);
@@ -406,12 +421,12 @@ async function showHospital(id) {
     }
   }
   if (hospital.installedBase.changeHistory.length || hospital.installedBase.conflictHistory.some(/** @param {any} conflict */ conflict => conflict.status === 'resolved')) {
-    const history = document.createElement('details'); history.className = 'audit-history'; history.append(node('summary', 'Historial de cambios y conflictos resueltos'));
+    const history = document.createElement('details'); history.className = 'audit-history'; history.setAttribute('data-hospital-section', 'history'); history.append(node('summary', 'Historial de cambios y conflictos resueltos'));
     for (const change of hospital.installedBase.changeHistory) history.append(node('p', `${new Date(change.at).toLocaleString('es')} · ${change.author.name} · ${change.field}: ${change.oldValue ?? 'Desconocido'} → ${change.newValue ?? 'Desconocido'} · ${change.reason}`));
     for (const conflict of hospital.installedBase.conflictHistory.filter(/** @param {any} entry */ entry => entry.status === 'resolved')) history.append(node('p', `Conflicto ${conflict.field} resuelto por ${conflict.resolution.author.name}: ${conflict.resolution.value} · ${conflict.resolution.explanation}`));
     target.append(history);
   }
-  target.append(node('h3', 'Observaciones que sustentan la base instalada'));
+  target.append(sectionHeading('Observaciones que sustentan la base instalada', 'observations'));
   for (const observation of hospital.observations) {
     const article = document.createElement('article');
     article.append(node('h3', `${observation.profile.name} · ${observation.profile.role}`), node('p', new Date(observation.createdAt).toLocaleString('es')));
@@ -433,9 +448,25 @@ async function showHospital(id) {
     details.append(original, node('p', `Capturada: ${new Date(observation.capturedAt).toLocaleString('es')} · ${provenance}`));
     article.append(details); target.append(article);
   }
+  window.dispatchEvent(new CustomEvent('sitesignal:hospital-rendered', { detail: { id, name: hospital.name } }));
 }
 window.addEventListener('sitesignal:hospital', event => {
   const id = event instanceof CustomEvent ? event.detail : null;
-  if (typeof id === 'string') showHospital(id).then(() => el('hospital-view').scrollIntoView({ behavior: 'smooth' })).catch(report);
+  if (typeof id === 'string') showHospital(id).then(() => el('hospital-view').scrollIntoView({ behavior: 'smooth' })).catch(error => {
+    const target = el('hospital-view'); target.replaceChildren(node('h2', 'Hospital no encontrado'), node('p', 'El perfil solicitado no existe o ya no está disponible.'));
+    const link = document.createElement('a'); link.href = '#/hospitales'; link.className = 'primary button-link'; link.textContent = 'Volver a hospitales'; target.append(link); report(error);
+  });
+});
+window.addEventListener('sitesignal:status', event => {
+  if (!(event instanceof CustomEvent)) return; serviceStatus = event.detail ?? {};
+  const textUnavailable = serviceStatus.qvac?.state === 'unavailable';
+  const voiceUnavailable = serviceStatus.voice?.state === 'unavailable';
+  const extract = /** @type {HTMLButtonElement} */ (el('extract')); const manual = /** @type {HTMLButtonElement} */ (el('manual-capture'));
+  extract.hidden = textUnavailable; extract.disabled = textUnavailable; manual.hidden = !textUnavailable;
+  el('text-availability').hidden = !textUnavailable; el('text-availability').textContent = textUnavailable ? (serviceStatus.qvac?.message || 'QVAC de texto no está disponible. Continúa con captura manual.') : '';
+  const voiceTab = /** @type {HTMLButtonElement} */ (document.querySelector('[data-capture-tab="voice"]'));
+  voiceTab.disabled = voiceUnavailable; voiceTab.title = voiceUnavailable ? (serviceStatus.voice?.message || 'QVAC de voz no está disponible.') : '';
+  el('voice-availability').hidden = !voiceUnavailable; el('voice-availability').textContent = voiceUnavailable ? (serviceStatus.voice?.message || 'QVAC de voz no está disponible. Escribe el relato para continuar.') : '';
+  if (voiceUnavailable && voiceTab.classList.contains('active')) document.querySelector('[data-capture-tab="write"]')?.dispatchEvent(new MouseEvent('click'));
 });
 Promise.all([loadProfiles(), loadHospitals()]).catch(report);
