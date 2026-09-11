@@ -302,6 +302,26 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       let hospital = input.hospitalId ? db.prepare('SELECT * FROM hospitals WHERE id = ?').get(input.hospitalId) : undefined;
       if (input.hospitalId && !hospital) throw new RequestError(404, 'Selecciona un hospital existente.');
       if (!hospital && !input.reviewed.hospital) throw new RequestError(400, 'Indica el nombre del hospital o selecciona uno existente.');
+      // Creating a hospital is a separate identity decision from creating an observation: without this
+      // check, saving twice with "Crear un hospital con los datos revisados" for what is really the same
+      // site (a slightly different narration of the same visit, a second visit typed instead of picked
+      // from the dropdown) silently produces two disconnected hospital records — each with its own
+      // installed base — and the existing duplicate-equipment detection never runs across them, since it
+      // is scoped per hospital. Reject an exact name match unless city/country data actually distinguishes
+      // the two sites (two genuinely different hospitals can share a common generic name); require the
+      // explicit choice the UI already offers, the same way equipment duplicates stay pending for a human
+      // decision instead of being merged or duplicated automatically.
+      if (!hospital && input.reviewed.hospital) {
+        const normalizedName = normalize(input.reviewed.hospital);
+        /** @param {unknown} a @param {unknown} b */
+        const compatible = (a, b) => !a || !b || normalize(String(a)) === normalize(String(b));
+        const existingMatch = /** @type {any[]} */ (db.prepare('SELECT * FROM hospitals').all()).find(row =>
+          normalize(String(row.name)) === normalizedName
+          && compatible(row.client, input.reviewed.client)
+          && compatible(row.city, input.reviewed.city)
+          && compatible(row.country, input.reviewed.country));
+        if (existingMatch) throw new RequestError(409, `Ya existe un hospital llamado "${existingMatch.name}"${existingMatch.client ? ` (cliente: ${existingMatch.client})` : ''}. Selecciónalo en "Destino de la observación" en vez de crear uno nuevo, para no duplicar la base instalada.`);
+      }
       db.exec('BEGIN');
       try {
         if (!hospital) {

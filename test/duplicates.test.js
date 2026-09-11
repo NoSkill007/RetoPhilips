@@ -99,3 +99,57 @@ test('una coincidencia aproximada explica diferencias y solo consolida por decis
     assert.equal(hospital.installedBase.conflicts[0].field, 'model');
   } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
 });
+
+test('dos reportes escasos del mismo hospital y modalidad, con cantidades distintas, se marcan como candidato en vez de duplicarse en silencio', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sitesignal-sparse-duplicate-'));
+  const context = await setup(directory);
+  try {
+    // Neither report names a manufacturer, model or age — the least detailed, most duplicate-prone case,
+    // and previously the one the system was least able to flag (see HANDOFF.md for the full story).
+    const firstFields = { client: null, hospital: 'Hospital Aurora', area: null, equipment: [
+      { modality: 'tomógrafos', quantity: 'dos', manufacturer: null, model: null, serial: null, age: null },
+    ] };
+    const first = await context.save(firstFields, 'Visité Hospital Aurora. Vi dos tomógrafos.', null);
+    const secondFields = { client: null, hospital: 'Hospital Aurora', area: null, equipment: [
+      { modality: 'tomógrafos', quantity: 'cinco', manufacturer: null, model: null, serial: null, age: null },
+    ] };
+    const second = await context.save(secondFields, 'Visité Hospital Aurora. Vi cinco tomógrafos.', first.hospitalId);
+    const hospital = await context.api('/api/hospitals/' + first.hospitalId);
+    // both group records still exist — nothing merges or drops without a human decision — but now there is
+    // exactly one pending candidate explaining the ambiguity, instead of a silent, uncommented 2+5=7 total.
+    assert.equal(hospital.installedBase.items.length, 2);
+    assert.equal(hospital.installedBase.duplicateCandidates.length, 1);
+    const candidate = hospital.installedBase.duplicateCandidates[0];
+    assert.equal(candidate.kind, 'approximate');
+    assert.ok(candidate.matchingFields.some(/** @param {any} match */ match => match.field === 'modality'));
+    assert.ok(candidate.conflictingFields.some(/** @param {any} match */ match => match.field === 'quantity' && match.left === 2 && match.right === 5));
+    assert.deepEqual(new Set(candidate.itemIds), new Set(hospital.installedBase.items.map(/** @param {any} item */ item => item.id)));
+
+    const decision = await context.api(`/api/duplicate-candidates/${candidate.id}/decision`, { decision: 'consolidate' });
+    assert.equal(decision.status, 'consolidated');
+    const resolved = await context.api('/api/hospitals/' + first.hospitalId);
+    assert.equal(resolved.installedBase.items.length, 1);
+    // consolidation takes the larger reported count rather than adding them — a recount, not two groups.
+    assert.equal(resolved.installedBase.items[0].quantity, 5);
+    assert.equal(resolved.installedBase.total, 5);
+    assert.deepEqual(new Set(resolved.installedBase.items[0].sourceObservationIds), new Set([first.id, second.id]));
+  } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('un fabricante y modelo genuinamente distintos para la misma modalidad no se marcan como candidato', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sitesignal-distinct-equipment-'));
+  const context = await setup(directory);
+  try {
+    const firstFields = { client: null, hospital: 'Hospital Aurora', area: null, equipment: [
+      { modality: 'ecógrafos', quantity: 'dos', manufacturer: 'DemoMed', model: 'Alpha', serial: null, age: null },
+    ] };
+    const first = await context.save(firstFields, 'Visité Hospital Aurora. Vi dos ecógrafos DemoMed Alpha.', null);
+    const secondFields = { client: null, hospital: 'Hospital Aurora', area: null, equipment: [
+      { modality: 'ecógrafos', quantity: 'tres', manufacturer: 'OtraMarca', model: 'Zeta', serial: null, age: null },
+    ] };
+    await context.save(secondFields, 'Visité Hospital Aurora. Vi tres ecógrafos OtraMarca Zeta.', first.hospitalId);
+    const hospital = await context.api('/api/hospitals/' + first.hospitalId);
+    assert.equal(hospital.installedBase.items.length, 2);
+    assert.equal(hospital.installedBase.duplicateCandidates.length, 0);
+  } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
+});

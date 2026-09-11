@@ -150,7 +150,16 @@ export function installedBase(db, now) {
     if (sameSerial) matchingFields.push({ field: 'serial', left: left.serial, right: right.serial });
     else if (left.serial && right.serial) return null;
     const modalityMatches = matchingFields.some(match => match.field === 'modality');
-    if (!sameSerial && (!modalityMatches || matchingFields.length < 3)) return null;
+    // A field that's simply unknown on one or both sides is neither evidence for nor against a match — it
+    // never appears in matchingFields or conflictingFields at all (see compareText above). Requiring a
+    // fixed count of *positive* matches beyond hospital+modality silently exempted the sparsest, least
+    // detailed reports — a bare "two tomógrafos" followed later by "five tomógrafos" at the same hospital,
+    // with nothing else known either time — from ever being flagged, which is exactly backwards: an
+    // incomplete report is the case most likely to be an unrecognized re-report of the same group, not
+    // less likely. The only real disqualifier is *positive* conflicting evidence on identity itself —
+    // manufacturer AND model both actively disagreeing — which two truly distinct products would show.
+    const identityConflict = conflictingFields.some(match => match.field === 'manufacturer') && conflictingFields.some(match => match.field === 'model');
+    if (!sameSerial && (!modalityMatches || identityConflict)) return null;
     return { kind: sameSerial ? 'serial' : 'approximate', matchingFields, conflictingFields };
   }
 
