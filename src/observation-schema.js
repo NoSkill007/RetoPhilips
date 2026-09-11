@@ -36,6 +36,20 @@ export const saveSchema = z.object({
 
 /** @param {string} value */
 export function normalize(value) { return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(); }
+/** Generic institution-type words that a real hospital name is built around ("Hospital Santo Tom\u00e1s",
+ * "Cl\u00ednica Santo Tom\u00e1s", or just "Santo Tom\u00e1s" once the type is dropped) \u2014 shared by the extraction
+ * anchor below and by the hospital-name matching in observations.js, so the same word list decides
+ * both "does this text mention a hospital" and "are these two hospital names actually the same site". */
+export const institutionTypeWords = 'hospital|clinica|clinic|centro medico|medical center|instituto|institute|policlinica|policlinic|sanatorio|centro de salud|health center';
+/** Strips a leading/trailing institution-type word so "Hospital Santo Tom\u00e1s" and "Santo Tom\u00e1s" reduce
+ * to the same core name \u2014 a collaborator often narrates the same site with or without the generic word
+ * between visits. Falls back to the plain normalized name whenever stripping would leave nothing
+ * distinctive (a bare "Hospital" with no name of its own must never match every other bare "Hospital").
+ * @param {string} value */
+export function hospitalCoreName(value) {
+  const stripped = normalize(value).replace(new RegExp(`\\b(?:${institutionTypeWords})\\b`, 'g'), '').replace(/\s+/g, ' ').trim();
+  return stripped.length >= 2 ? stripped : normalize(value);
+}
 /** Convert common model placeholders for missing data into actual JSON null values before evidence validation.
  * @param {unknown} raw
  */
@@ -224,7 +238,7 @@ export function validateExtraction(raw, source, now = new Date()) {
     };
   });
   const unique = equipment.filter((item, index) => equipment.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(item)) === index);
-  const hospitalLabel = 'hospital|clinica|clinic|centro medico|medical center|instituto|institute|policlinica|policlinic|sanatorio|centro de salud|health center';
+  const hospitalLabel = institutionTypeWords;
   // A single-site facility name is sometimes swapped into "client" by the model instead of "hospital" (there
   // being no separate parent organization to report) — recover it there if the hospital guess didn't pan out.
   const hospitalAccepted = anchored(fields.hospital, hospitalLabel) ?? anchored(fields.client, hospitalLabel);

@@ -97,6 +97,40 @@ test('un borrador cuyo nombre, cliente, ciudad y país ya coinciden con un hospi
   } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
+test('un mismo hospital nombrado con y sin la palabra "Hospital" se reconoce como el mismo sitio', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'sitesignal-hospital-generic-word-'));
+  const context = await setup(directory);
+  try {
+    const draft1 = await context.draftFor({ client: null, hospital: 'Hospital Santo Tomás', area: null, equipment: [
+      { modality: 'tomógrafo', quantity: 'uno', manufacturer: 'DemoMed', model: 'X1', serial: 'SN-ST1', age: null },
+    ] }, 'Visité el Hospital Santo Tomás. Vi un tomógrafo DemoMed X1, número de serie SN-ST1.');
+    const saved1 = await context.ok('/api/observations', { draftId: draft1.id, reviewed: draft1.reviewed, hospitalId: null });
+
+    // A second visit where QVAC extracts the field without the generic word "Hospital" — the source
+    // text still says "Hospital Santo Tomás" (so the extraction validator's anchor check still accepts
+    // it), but the extracted field itself drops the word, exactly the kind of extraction variability
+    // documented in HANDOFF.md. The exact-match rule must strip that word on both sides before
+    // comparing, or a second, disconnected hospital record gets created for what is really one place.
+    const draft2 = await context.draftFor({ client: null, hospital: 'Santo Tomás', area: null, equipment: [
+      { modality: 'tomógrafo', quantity: 'uno', manufacturer: 'DemoMed', model: 'X2', serial: 'SN-ST2', age: null },
+    ] }, 'Segunda visita al Hospital Santo Tomás. Vi un tomógrafo DemoMed X2, número de serie SN-ST2.');
+    assert.equal(draft2.exactMatchId, saved1.hospitalId);
+    const saved2 = await context.ok('/api/observations', { draftId: draft2.id, reviewed: draft2.reviewed, hospitalId: draft2.exactMatchId });
+    assert.equal(saved2.hospitalId, saved1.hospitalId);
+
+    // and the 409 that guards against creating a hospital record fires too, for the collaborator who
+    // instead picks "Crear un hospital con los datos revisados" despite the (now correct) auto-match.
+    const draft3 = await context.draftFor({ client: null, hospital: 'Santo Tomás', area: null, equipment: [
+      { modality: 'tomógrafo', quantity: 'uno', manufacturer: 'DemoMed', model: 'X3', serial: 'SN-ST3', age: null },
+    ] }, 'Tercera visita al Hospital Santo Tomás. Vi un tomógrafo DemoMed X3, número de serie SN-ST3.');
+    const response3 = await context.api('/api/observations', { draftId: draft3.id, reviewed: draft3.reviewed, hospitalId: null });
+    assert.equal(response3.status, 409);
+
+    const hospitals = await context.ok('/api/hospitals');
+    assert.equal(hospitals.filter(/** @param {any} h */ h => ['Hospital Santo Tomás', 'Santo Tomás'].includes(h.name)).length, 1, 'no debe existir un segundo registro bajo el nombre sin "Hospital"');
+  } finally { await context.app.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test('un candidato por nombre parcial no cuenta como coincidencia exacta', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'sitesignal-hospital-partial-match-'));
   const context = await setup(directory);

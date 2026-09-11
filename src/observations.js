@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { profileSchema, activeSchema, captureSchema, saveSchema, inferenceSchema, validateExtraction, sanitizeExtraction, normalize, modalities } from './observation-schema.js';
+import { profileSchema, activeSchema, captureSchema, saveSchema, inferenceSchema, validateExtraction, sanitizeExtraction, normalize, hospitalCoreName, modalities } from './observation-schema.js';
 import { regionFor } from './region.js';
 import { assessObservation, confidencePolicy, nextFollowUp } from './confidence.js';
 import { installedBase } from './installed-base.js';
@@ -108,13 +108,16 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
   /** Finds the one existing hospital whose name, client, city and country are all compatible with the
    * reviewed draft — the same exact-match rule the save endpoint uses to refuse a second, duplicate
    * hospital record. Reused here so the review screen can pick that hospital as the destination by
-   * itself instead of leaving the collaborator to notice and select it manually.
+   * itself instead of leaving the collaborator to notice and select it manually. Names compare by
+   * their "core" (institution-type words like "Hospital"/"Clínica" stripped) so a second visit that
+   * drops or adds that generic word — "Santo Tomás" vs. "Hospital Santo Tomás" — still counts as the
+   * same site instead of quietly producing a second hospital record.
    * @param {{hospital: string | null, client?: string | null, city?: string | null, country?: string | null}} reviewed */
   function findExactHospitalMatch(reviewed) {
     if (!reviewed.hospital) return null;
-    const normalizedName = normalize(reviewed.hospital);
+    const coreName = hospitalCoreName(reviewed.hospital);
     return /** @type {any[]} */ (db.prepare('SELECT * FROM hospitals').all()).find(row =>
-      normalize(String(row.name)) === normalizedName
+      hospitalCoreName(String(row.name)) === coreName
       && compatible(row.client, reviewed.client)
       && compatible(row.city, reviewed.city)
       && compatible(row.country, reviewed.country)) ?? null;
