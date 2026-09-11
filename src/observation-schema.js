@@ -55,15 +55,29 @@ function numeric(value) {
   const index = words.findIndex(group => group.some(word => normalized.split(/\W+/).includes(word)));
   return index === -1 ? null : index;
 }
+/** Keyword stems for each canonical modality, shared by classification and by locating a mention in the
+ * source independently of the model's own (possibly non-literal) wording — see `modality()` below.
+ * @type {[RegExp, string][]} */
+const modalityPatternList = [
+  [/resona|\bmri?\b|magnetic/, modalities[0]],
+  [/tomograf|\bct\b|computed tomography/, modalities[1]],
+  [/ultra|\bus\b|ecograf|sonograph/, modalities[2]],
+  [/monitor/, modalities[3]],
+  [/rayos|x.ray/, modalities[4]],
+  [/interven/, modalities[5]],
+  [/mamograf|mammogra/, modalities[6]],
+  [/medicina nuclear|nuclear medicine|\bpet\b/, modalities[7]],
+  [/electrocardiograf|\becg\b|\bekg\b/, modalities[8]],
+  [/ventilad|ventilator/, modalities[9]],
+  [/desfibrilad|defibrillat/, modalities[10]],
+  [/endoscop/, modalities[11]],
+  [/\botro\b|\bother\b/, modalities[12]],
+];
 /** @param {string | null} value */
 function modality(value) {
   if (!value) return null;
   const text = normalize(value);
-  const patterns = [/resonancia|\bmri?\b|magnetic/, /tomograf|\bct\b|computed tomography/, /ultra|\bus\b|ecograf|sonograph/, /monitor/, /rayos|x.ray/, /interven/,
-    /mamograf|mammogra/, /medicina nuclear|nuclear medicine|\bpet\b/, /electrocardiograf|\becg\b|\bekg\b/, /ventilad|ventilator/, /desfibrilad|defibrillat/, /endoscop/];
-  const index = patterns.findIndex(pattern => pattern.test(text));
-  if (index >= 0) return modalities[index];
-  return /\botro\b|\bother\b/.test(text) ? modalities.at(-1) : null;
+  return modalityPatternList.find(([pattern]) => pattern.test(text))?.[1] ?? null;
 }
 /** Converts a duration ("ocho años") or, absent one, an install year stated nearby ("instalado en 2018",
  * "desde 2018") into an age in years as of `now`. A bare year with no installation cue is left unknown,
@@ -95,35 +109,48 @@ export function validateExtraction(raw, source, now = new Date()) {
   const anchored = (value, label) => {
     const accepted = supported(value);
     if (!accepted) return null;
-    if (new RegExp(`\\b(?:${label})\\b`, 'i').test(normalize(accepted))) return accepted;
+    // Leading boundary only (no trailing \b): label stems must still start a word, but the value's own
+    // inflection can run on past the stem — "Centro Clínico" (clínico) must match a "clinica" label the
+    // same way "Clínica" does; a full-word match would silently miss every adjective/plural form.
+    if (new RegExp(`\\b(?:${label})`, 'i').test(normalize(accepted))) return accepted;
     const quoted = escape(normalize(accepted));
-    return new RegExp(`(?:${label})[^.\\n]{0,35}\\b${quoted}\\b`, 'i').test(normalizedSource) ? accepted : null;
+    // The label must lead straight into the value (at most one short connector word) — not just appear
+    // somewhere in the preceding 35 characters. "Hospital San Gabriel en La Paz, Bolivia" must not let
+    // "Hospital" anchor "La Paz, Bolivia" merely because it precedes it; a real other name sits between them.
+    const connector = '(?:\\s+(?:de la|del|de|la|el|los|las|the|of)\\b)?\\s*';
+    return new RegExp(`\\b(?:${label})${connector}${quoted}`, 'i').test(normalizedSource) ? accepted : null;
   };
   /** Falls back to accepting a value stated right next to the hospital mention (e.g. "en São Paulo, Brasil,
-   * en el Hospital Aurora") when no explicit "ciudad"/"país" label is present — the same natural-speech gap
-   * as equipment manufacturer/model. @param {string | null} value @param {string} label @param {number} anchorIndex */
-  const anchoredNearHospital = (value, label, anchorIndex) => {
+   * en el Hospital Aurora", or "Instituto Radiológico del Sur en Montevideo, Uruguay") when no explicit
+   * "ciudad"/"país" label is present — the same natural-speech gap as equipment manufacturer/model.
+   * Distance is measured to the nearer edge of the hospital name span, not a single fixed point, since a
+   * long facility name otherwise pushes anything stated right after it out of a start-anchored range.
+   * @param {string | null} value @param {string} label @param {{start: number, end: number} | null} hospitalSpan */
+  const anchoredNearHospital = (value, label, hospitalSpan) => {
     const direct = anchored(value, label);
     if (direct) return direct;
     const accepted = supported(value);
-    if (!accepted || anchorIndex < 0) return null;
+    if (!accepted || !hospitalSpan) return null;
     const valueIndex = normalizedSource.indexOf(normalize(accepted));
-    return valueIndex >= 0 && Math.abs(valueIndex - anchorIndex) <= 40 ? accepted : null;
+    if (valueIndex < 0) return null;
+    const distance = valueIndex >= hospitalSpan.start && valueIndex <= hospitalSpan.end ? 0
+      : Math.min(Math.abs(valueIndex - hospitalSpan.start), Math.abs(valueIndex - hospitalSpan.end));
+    return distance <= 40 ? accepted : null;
   };
+  // Classify each equipment's modality by keyword stem rather than requiring the model to quote the source
+  // verbatim: a smaller model routinely paraphrases "tomógrafos" (the device) as "tomografía computarizada"
+  // (the procedure) — same modality, different inflection — and a literal-substring gate would reject that.
+  const categories = fields.equipment.map(item => modality(item.modality));
   const occurrences = new Map();
-  const mentions = fields.equipment.map(item => {
-    const value = normalize(supported(item.modality) ?? '');
-    if (!value) return -1;
-    const occurrence = occurrences.get(value) ?? 0;
-    let position = -1;
-    let from = 0;
-    for (let index = 0; index <= occurrence; index += 1) {
-      position = normalizedSource.indexOf(value, from);
-      if (position === -1) break;
-      from = position + value.length;
-    }
-    occurrences.set(value, occurrence + 1);
-    return position === -1 ? normalizedSource.indexOf(value) : position;
+  const mentions = categories.map(category => {
+    const entry = category ? modalityPatternList.find(([, name]) => name === category) : undefined;
+    if (!entry) return -1;
+    const pattern = new RegExp(entry[0].source, entry[0].flags.includes('g') ? entry[0].flags : `${entry[0].flags}g`);
+    const matches = [...normalizedSource.matchAll(pattern)];
+    if (!matches.length) return -1;
+    const occurrence = occurrences.get(category) ?? 0;
+    occurrences.set(category, occurrence + 1);
+    return (matches[occurrence] ?? matches[0]).index ?? -1;
   });
   const positions = [...new Set(mentions.filter(position => position >= 0))].sort((a, b) => a - b);
   /** @param {number} itemIndex */
@@ -153,45 +180,57 @@ export function validateExtraction(raw, source, now = new Date()) {
     return normalizedSource.slice(start, end);
   }
   const equipment = fields.equipment.map((item, itemIndex) => {
-    const rawModality = supported(item.modality);
-    const modalityText = normalize(rawModality ?? '');
+    const category = categories[itemIndex];
     const context = clauseFor(itemIndex);
-    const modalityIndex = context.indexOf(modalityText);
-    /** Accept a value either next to an explicit label (e.g. "fabricante GE") or, absent a label,
-     * simply adjacent to the equipment's own modality mention (e.g. "un ecógrafo GE Voluson") —
+    const categoryPattern = category ? modalityPatternList.find(([, name]) => name === category)?.[0] : undefined;
+    const modalityIndex = categoryPattern ? (context.match(categoryPattern)?.index ?? -1) : -1;
+    /** Descriptive adjectives a model routinely mistakes for a manufacturer/model name because they sit
+     * right next to the equipment noun ("un ecógrafo básico", "a portable ultrasound") — real product
+     * identifiers don't collide with this closed list, so it only ever blocks noise, never a genuine name. */
+    const descriptiveNoise = /^(?:basico|basica|basic|portatil|portable|moderno|moderna|modern|nuevo|nueva|new|viejo|vieja|old|antiguo|antigua|chico|chica|small|grande|large|fijo|fija|fixed|stationary|movil|mobile|digital|analogo|analogic|analog)s?$/;
+    /** Accept a value either next to an explicit label (e.g. "fabricante GE") or, absent a label, adjacent to
+     * the equipment's own modality mention (e.g. "un ecógrafo GE Voluson") or to another already-accepted
+     * anchor (e.g. "Philips Brilliance" — model sits next to the manufacturer, one hop further from modality) —
      * natural speech usually states the brand/model right next to the equipment noun without labeling it.
-     * @param {string | null} value @param {string} label @param {boolean} [allowAdjacentToModality] */
-    const equipmentField = (value, label, allowAdjacentToModality = false) => {
+     * @param {string | null} value @param {string} label @param {boolean} [allowAdjacent] @param {number} [extraAnchorIndex] */
+    const equipmentField = (value, label, allowAdjacent = false, extraAnchorIndex = -1) => {
       const accepted = value && context.includes(normalize(value)) ? value : null;
       if (!accepted) return null;
       const quoted = escape(normalize(accepted));
       if (new RegExp(`(?:${label})[^,;.\\n]{0,30}\\b${quoted}\\b`, 'i').test(context)) return accepted;
-      if (!allowAdjacentToModality || modalityText.length === 0 || modalityIndex < 0) return null;
+      if (!allowAdjacent || descriptiveNoise.test(normalize(accepted))) return null;
       const valueIndex = context.indexOf(normalize(accepted));
-      return valueIndex >= 0 && Math.abs(valueIndex - modalityIndex) <= 40 ? accepted : null;
+      if (valueIndex < 0) return null;
+      if (modalityIndex >= 0 && Math.abs(valueIndex - modalityIndex) <= 40) return accepted;
+      return extraAnchorIndex >= 0 && Math.abs(valueIndex - extraAnchorIndex) <= 40 ? accepted : null;
     };
     const quantity = numeric(item.quantity);
     const quantitySupported = quantity === null ? null : [...context.matchAll(/\d+(?:[.,]\d+)?|[a-z]+/g)].some(match => {
       const tokenIndex = match.index;
-      return numeric(match[0]) === quantity && ((tokenIndex <= modalityIndex && modalityIndex - tokenIndex <= 30) || /(?:cantidad|quantity|count)[^,;.\n]{0,20}$/.test(context.slice(0, tokenIndex)));
+      return numeric(match[0]) === quantity && ((modalityIndex >= 0 && Math.abs(tokenIndex - modalityIndex) <= 30) || /(?:cantidad|quantity|count)[^,;.\n]{0,20}$/.test(context.slice(0, tokenIndex)));
     }) ? quantity : null;
+    const manufacturer = equipmentField(item.manufacturer, 'fabricante|marca|manufacturer|brand|made by', true);
+    const manufacturerIndex = manufacturer ? context.indexOf(normalize(manufacturer)) : -1;
     return {
-      modality: modality(rawModality), quantity: quantitySupported,
-      manufacturer: equipmentField(item.manufacturer, 'fabricante|marca|manufacturer|brand|made by', true),
-      model: equipmentField(item.model, 'modelo|model', true),
+      modality: category, quantity: quantitySupported, manufacturer,
+      model: equipmentField(item.model, 'modelo|model', true, manufacturerIndex),
       serial: equipmentField(item.serial, 'numero de serie|número de serie|serial|s[\\s./-]*n'),
       age: ageInYears(item.age, context, now),
     };
   });
   const unique = equipment.filter((item, index) => equipment.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(item)) === index);
-  const hospitalAccepted = anchored(fields.hospital, 'hospital|clinica|clinic|centro medico|medical center');
-  const hospitalIndex = hospitalAccepted ? normalizedSource.indexOf(normalize(hospitalAccepted)) : -1;
+  const hospitalLabel = 'hospital|clinica|clinic|centro medico|medical center|instituto|institute|policlinica|policlinic|sanatorio|centro de salud|health center';
+  // A single-site facility name is sometimes swapped into "client" by the model instead of "hospital" (there
+  // being no separate parent organization to report) — recover it there if the hospital guess didn't pan out.
+  const hospitalAccepted = anchored(fields.hospital, hospitalLabel) ?? anchored(fields.client, hospitalLabel);
+  const hospitalStart = hospitalAccepted ? normalizedSource.indexOf(normalize(hospitalAccepted)) : -1;
+  const hospitalSpan = hospitalStart >= 0 ? { start: hospitalStart, end: hospitalStart + normalize(hospitalAccepted ?? '').length } : null;
   const reviewed = reviewedSchema.parse({
     client: anchored(fields.client, 'cliente|client|organizacion|organization'),
     hospital: hospitalAccepted,
     area: anchored(fields.area, 'area|departamento|department|edificio|building|sala|unidad|servicio|consultorio|piso|planta|ala|pabellon|room|unit|service|ward|wing|floor'),
-    city: anchoredNearHospital(fields.city ?? null, 'ciudad|city', hospitalIndex),
-    country: anchoredNearHospital(fields.country ?? null, 'pais|country', hospitalIndex),
+    city: anchoredNearHospital(fields.city ?? null, 'ciudad|city', hospitalSpan),
+    country: anchoredNearHospital(fields.country ?? null, 'pais|country', hospitalSpan),
     equipment: unique,
   });
   const issues = [];

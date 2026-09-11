@@ -165,6 +165,99 @@ test('un número de cuatro dígitos sin indicio de instalación no se confunde c
   } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
 });
 
+test('una modalidad parafraseada por el modelo (tomógrafo vs. tomografía computarizada) se reconoce igual', async () => {
+  const text = 'Visita terminada en el Centro Médico Paitilla. Tienen tres tomógrafos computarizados. Dos son Philips Brilliance de hace unos 6 años en el primer piso. El tercero lo acaban de cambiar hace menos de un año por un Siemens Somatom de 128 cortes en la torre nueva.';
+  const claims = { client: 'Centro Médico Paitilla', hospital: 'Centro Médico Paitilla', area: 'no specified', equipment: [
+    { modality: 'tomografía computarizada', quantity: '2', manufacturer: 'Philips', model: 'Brilliance', serial: 'no specified', age: '6 años' },
+    { modality: 'tomografía computarizada', quantity: '1', manufacturer: 'Siemens', model: 'Somatom', serial: 'no specified', age: '1 año' },
+  ] };
+  const context = await scenario(async () => ({ fields: claims, metadata: { engine: 'QVAC', model: 'fixture', durationMs: 2 } }));
+  try {
+    const draft = await context.post('/api/drafts', { text });
+    // QVAC's raw wording ("tomografía computarizada", the procedure) never appears verbatim in the source
+    // ("tomógrafos computarizados", the device) — the validator must still recognize the same modality.
+    assert.equal(draft.reviewed.hospital, 'Centro Médico Paitilla');
+    assert.equal(draft.reviewed.equipment[0].modality, 'Tomografía computarizada');
+    assert.equal(draft.reviewed.equipment[0].manufacturer, 'Philips');
+    assert.equal(draft.reviewed.equipment[0].age, 6);
+    assert.equal(draft.reviewed.equipment[1].modality, 'Tomografía computarizada');
+    // still not a full manual fallback: hospital and at least one modality are backed.
+    assert.equal(draft.provenance.kind, 'qvac');
+    assert.equal(draft.provenance.partial, true);
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});
+
+test('una cantidad de subgrupo mencionada después de la modalidad y un modelo dos saltos después se aceptan', async () => {
+  const text = 'Visita terminada en el Centro Médico Paitilla. Tienen tres tomógrafos computarizados. Dos son Philips Brilliance de hace unos 6 años en el primer piso. El tercero lo acaban de cambiar hace menos de un año por un Siemens Somatom de 128 cortes en la torre nueva.';
+  const claims = { client: null, hospital: 'Centro Médico Paitilla', area: null, equipment: [
+    { modality: 'tomografía computarizada', quantity: '2', manufacturer: 'Philips', model: 'Brilliance', serial: null, age: '6 años' },
+  ] };
+  const context = await scenario(async () => ({ fields: claims, metadata: { engine: 'QVAC', model: 'fixture', durationMs: 2 } }));
+  try {
+    const draft = await context.post('/api/drafts', { text });
+    // "Dos" (quantity) sits after the modality mention, and "Brilliance" (model) sits two hops away —
+    // both were previously rejected by a before-only/modality-only proximity check.
+    assert.equal(draft.reviewed.equipment[0].quantity, 2);
+    assert.equal(draft.reviewed.equipment[0].manufacturer, 'Philips');
+    assert.equal(draft.reviewed.equipment[0].model, 'Brilliance');
+    assert.equal(draft.reviewed.equipment[0].age, 6);
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});
+
+test('un hospital de nombre largo no bloquea el país que aparece justo después de su nombre', async () => {
+  const text = 'Visité Instituto Radiológico del Sur en Montevideo, Uruguay. Operan dos resonadores: uno 3T casi nuevo de 2 años y otro 1.5T más antiguo de unos 9 años.';
+  const claims = { client: 'Instituto Radiológico del Sur', hospital: 'Instituto Radiológico del Sur', area: 'Montevideo', city: 'Montevideo', country: 'Uruguay', equipment: [
+    { modality: 'resonador', quantity: '1', manufacturer: null, model: null, serial: null, age: 'casi nuevo de 2 años' },
+    { modality: 'resonador', quantity: '1', manufacturer: null, model: null, serial: null, age: 'más antiguo de unos 9 años' },
+  ] };
+  const context = await scenario(async () => ({ fields: claims, metadata: { engine: 'QVAC', model: 'fixture', durationMs: 2 } }));
+  try {
+    const draft = await context.post('/api/drafts', { text });
+    // "Instituto" is long enough that a start-anchored distance check pushes "Uruguay" out of range —
+    // distance must be measured from the nearer edge of the hospital name, not a single fixed point.
+    assert.equal(draft.reviewed.hospital, 'Instituto Radiológico del Sur');
+    assert.equal(draft.reviewed.city, 'Montevideo');
+    assert.equal(draft.reviewed.country, 'Uruguay');
+    // "resonador" (the device) must classify the same as "resonancia" (the procedure).
+    assert.equal(draft.reviewed.equipment[0].modality, 'Resonancia magnética');
+    assert.equal(draft.reviewed.equipment[1].modality, 'Resonancia magnética');
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});
+
+test('un país no mencionado en el relato no se acepta aunque el modelo lo infiera del contexto', async () => {
+  const text = "I'm at Hospital Alpha in São Paulo. I saw two CT systems and three MR systems.";
+  const claims = { client: 'Hospital Alpha', hospital: 'Hospital Alpha', area: null, city: 'São Paulo', country: 'Brazil', equipment: [
+    { modality: 'CT', quantity: '2', manufacturer: null, model: null, serial: null, age: null },
+    { modality: 'MR', quantity: '3', manufacturer: null, model: null, serial: null, age: null },
+  ] };
+  const context = await scenario(async () => ({ fields: claims, metadata: { engine: 'QVAC', model: 'fixture', durationMs: 2 } }));
+  try {
+    const draft = await context.post('/api/drafts', { text });
+    assert.equal(draft.reviewed.city, 'São Paulo');
+    // "Brazil" is a reasonable inference from São Paulo, but the source never states it — must stay unknown.
+    assert.equal(draft.reviewed.country, null);
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});
+
+test('el nombre del hospital se recupera de "cliente" cuando el modelo pone ahí el sitio y en "hospital" la ciudad', async () => {
+  const text = 'Observación en Hospital San Gabriel en La Paz, Bolivia. Tienen un tomógrafo de unos 8 años y dos ecógrafos básicos de 5 años.';
+  const claims = { client: 'Hospital San Gabriel', hospital: 'La Paz, Bolivia', area: null, city: 'La Paz', country: 'Bolivia', equipment: [
+    { modality: 'tomógrafo', quantity: '1', manufacturer: null, model: null, serial: null, age: '8 años' },
+    { modality: 'ecógrafo', quantity: '2', manufacturer: null, model: 'básico', serial: null, age: '5 años' },
+  ] };
+  const context = await scenario(async () => ({ fields: claims, metadata: { engine: 'QVAC', model: 'fixture', durationMs: 2 } }));
+  try {
+    const draft = await context.post('/api/drafts', { text });
+    // "La Paz, Bolivia" must not be accepted as the hospital just because "Hospital" appears earlier in the
+    // sentence — the real name sits between them. The correct name is recovered from the swapped "client".
+    assert.equal(draft.reviewed.hospital, 'Hospital San Gabriel');
+    assert.equal(draft.reviewed.city, 'La Paz');
+    assert.equal(draft.reviewed.country, 'Bolivia');
+    // "básico" describes the ultrasound units, not a real model name.
+    assert.equal(draft.reviewed.equipment[1].model, null);
+  } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
+});
+
 test('una afirmación de fabricante ausente del relato sigue rechazándose aunque la modalidad esté cerca', async () => {
   const text = 'Visité Hospital Aurora. Vi dos teletransportadores.';
   const claims = { client: null, hospital: 'Hospital Aurora', area: null, equipment: [

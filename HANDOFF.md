@@ -56,6 +56,18 @@ Durante pruebas manuales con QVAC real tras el ticket #11 aparecieron varios hue
 - Un relato con un solo equipo ahora usa todo el texto como contexto de ese equipo (antes se cortaba en la primera oración), sin perder la protección que impide atribuirle a un equipo un dato de otra parte del relato (p. ej. el nombre del hospital) — ver la prueba "un dato presente en otro contexto no se atribuye al equipo".
 - Una afirmación genuinamente ambigua en el propio relato (p. ej. "no estoy seguro de la marca, parecía Siemens o Philips") sigue quedando `Desconocido` a propósito; no es un bug.
 
+Una segunda ronda de pruebas (50 relatos reales con QVAC, 25 en español y 25 en inglés, sin el prefijo "DemoCare") encontró y corrigió más huecos:
+
+- El prompt de extracción (`src/text-worker.js`) nunca pedía ciudad ni país al modelo; ahora sí, y con eso pasaron de 0/50 a 47/50 y 41/50 respectivamente.
+- "Resonador" (el aparato) no coincidía con el patrón de modalidad "resonancia" (el procedimiento); mismo tipo de bug que tomógrafo/tomografía, mismo arreglo (stem compartido).
+- El ancla de etiqueta (`anchored()`) exigía palabra completa; "Centro Clínico" no coincidía con "clínica" por la inflexión. Ahora solo exige el inicio de la palabra.
+- Lista de tipos de centro ampliada: instituto, policlínica, sanatorio, centro de salud (antes solo hospital/clínica/centro médico).
+- Cuando el modelo intercambia "cliente" y "hospital" en un centro de un solo sitio (p. ej. hospital="La Paz, Bolivia", cliente="Hospital San Gabriel"), el nombre correcto se recupera de "cliente".
+- La ventana de "etiqueta cerca del valor" (35 caracteres, sin restricción de qué hay en medio) dejaba que "Hospital San Gabriel en **La Paz, Bolivia**" anclara mal la ciudad como si fuera el hospital. Se acotó a un conector inmediato (de/del/la/el/the/of, sin nada más en medio).
+- La distancia ciudad/país–hospital se medía desde el inicio del nombre del hospital; con nombres largos ("Instituto Radiológico del Sur") el país quedaba fuera de rango aunque viniera justo después. Ahora se mide desde el borde más cercano del nombre.
+- Adjetivos descriptivos ("básico", "portátil", "moderno", "nuevo/viejo") ya no se aceptan como modelo de equipo solo por estar junto a la modalidad.
+- Un país que el modelo infiere del contexto pero no aparece literalmente en el relato (p. ej. "Brazil" a partir de "São Paulo") sigue rechazándose correctamente; verificado como comportamiento esperado, no un hueco.
+
 Estas correcciones vienen de leer el brief oficial de Philips (`doc-1788886999143-c967da0a.docx`, aportado por el usuario) y comparar sus ejemplos textuales contra el validador. El brief también pide capturar Ciudad y País como parte de "Customer" — se implementó en la misma sesión: `hospitals` ahora tiene columnas `city`/`country` (con migración segura para bases de datos ya existentes sin esas columnas), el schema y el validador los extraen con el mismo fallback de proximidad al nombre del hospital, y el panorama regional ya no muestra "Ubicación no informada"/"Ciudad no informada" para hospitales capturados que sí las reportaron.
 
 ## Próximo trabajo
@@ -90,7 +102,8 @@ La aplicación escucha en `http://127.0.0.1:3210`. Si el puerto está ocupado, c
 
 Estado verificado al escribir este documento:
 
-- `npm test`: 56/56 pruebas aprobadas.
+- `npm test`: 61/61 pruebas aprobadas.
+- Validación manual con QVAC real sobre 50 relatos naturales (25 español, 25 inglés, sin datos "DemoCare" prearmados) confirmó hospital + al menos una modalidad en 50/50, ciudad en 47/50 y país en 41/50, estable en tres corridas independientes. Los huecos restantes son casos donde el propio relato no menciona ciudad/país o QVAC no lo recordó esa vez; el validador correctamente rechazó el único caso donde QVAC infirió un país ("Brazil" a partir de "São Paulo") sin que apareciera en el texto.
 - `npm run typecheck`: aprobado.
 - `git diff --check`: aprobado.
 - Rama `main`: verifica con `git status -sb` antes de sincronizar; no se hace `push` automáticamente.

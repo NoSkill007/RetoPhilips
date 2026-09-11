@@ -167,7 +167,8 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
           }
           validResult = candidate;
           break;
-        } catch {
+        } catch (error) {
+          console.error(`[SiteSignal] Intento ${attempts} de extracción falló:`, error);
           validationIssues.push(`Intento ${attempts}: QVAC no devolvió el schema completo y válido.`);
         }
       }
