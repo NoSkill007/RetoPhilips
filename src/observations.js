@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { profileSchema, activeSchema, captureSchema, saveSchema, inferenceSchema, validateExtraction, sanitizeExtraction, normalize, modalities } from './observation-schema.js';
+import { regionFor } from './region.js';
 import { assessObservation, confidencePolicy, nextFollowUp } from './confidence.js';
 import { installedBase } from './installed-base.js';
 import { RequestError } from './request-error.js';
@@ -28,6 +29,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
   const hospitalColumns = new Set(db.prepare('PRAGMA table_info(hospitals)').all().map(row => String(row.name)));
   if (!hospitalColumns.has('city')) db.exec('ALTER TABLE hospitals ADD COLUMN city TEXT');
   if (!hospitalColumns.has('country')) db.exec('ALTER TABLE hospitals ADD COLUMN country TEXT');
+  if (!hospitalColumns.has('region')) db.exec('ALTER TABLE hospitals ADD COLUMN region TEXT');
   const base = installedBase(db, now);
   const regional = regionalPanorama(db, now);
   const query = naturalQuery(regional, interpretQuery);
@@ -197,7 +199,7 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       return opportunity.decide(itemId, hospitalId, input.decision, input.note, profile(String(active.value)));
     }
     if (path === '/api/drafts' && method === 'POST') {
-      const { text } = captureSchema.parse(body);
+      const { text, source: channel } = captureSchema.parse(body);
       const capturedAt = now().toISOString();
       const active = db.prepare("SELECT value FROM preferences WHERE key = 'activeProfile'").get();
       if (!active) throw new RequestError(409, 'Crea y selecciona un perfil de colaborador antes de capturar.');
@@ -238,8 +240,8 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       ] };
       const issues = [...new Set(validResult ? validResult.issues : validationIssues)];
       const provenance = validResult
-        ? { kind: 'qvac', metadata: validResult.inference, attempts, retryCorrected: attempts === 2, partial: validResult.issues.length > 0, validationIssues: issues }
-        : { kind: 'manual', attempts: 2, validationIssues: issues };
+        ? { kind: 'qvac', channel, metadata: validResult.inference, attempts, retryCorrected: attempts === 2, partial: validResult.issues.length > 0, validationIssues: issues }
+        : { kind: 'manual', channel, attempts: 2, validationIssues: issues };
       const draft = { id: randomUUID(), originalText: text, reviewed,
         extracted: validResult?.cleanedFields ?? null, profile: collaborator, provenance, capturedAt, followUpHistory: [] };
       db.prepare('INSERT INTO drafts VALUES (?, ?)').run(draft.id, JSON.stringify(draft));
@@ -303,8 +305,9 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
       db.exec('BEGIN');
       try {
         if (!hospital) {
-          hospital = { id: randomUUID(), name: input.reviewed.hospital, client: input.reviewed.client, city: input.reviewed.city ?? null, country: input.reviewed.country ?? null };
-          db.prepare('INSERT INTO hospitals VALUES (?, ?, ?, ?, ?)').run(hospital.id, hospital.name, hospital.client, hospital.city, hospital.country);
+          hospital = { id: randomUUID(), name: input.reviewed.hospital, client: input.reviewed.client, city: input.reviewed.city ?? null,
+            country: input.reviewed.country ?? null, region: regionFor(input.reviewed.country ?? null) };
+          db.prepare('INSERT INTO hospitals VALUES (?, ?, ?, ?, ?, ?)').run(hospital.id, hospital.name, hospital.client, hospital.city, hospital.country, hospital.region);
         }
         const observation = { id: randomUUID(), hospitalId: hospital.id, originalText: draft.originalText,
           reviewed: { ...input.reviewed, hospital: hospital.name, client: hospital.client, city: hospital.city ?? null, country: hospital.country ?? null }, extracted: draft.extracted,

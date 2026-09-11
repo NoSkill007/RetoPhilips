@@ -40,6 +40,9 @@ test('una observación captura ciudad y país, y el panorama regional los reflej
     const hospital = await api('/api/hospitals/' + saved.hospitalId);
     assert.equal(hospital.city, 'São Paulo');
     assert.equal(hospital.country, 'Brasil');
+    // a captured hospital's region is derived automatically from its country, not asked of QVAC or the
+    // collaborator — Brasil is Latin American like the rest of this prototype's dataset.
+    assert.equal(hospital.region, 'América Latina');
   } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -66,5 +69,6 @@ test('una base de datos existente sin columnas de ciudad/país migra sin perder 
     assert.equal(legacyHospital.name, 'Hospital Legado');
     assert.equal(legacyHospital.city ?? null, null);
     assert.equal(legacyHospital.country ?? null, null);
+    assert.equal(legacyHospital.region ?? null, null);
   } finally { await app.close(); await rm(directory, { recursive: true, force: true }); }
 });

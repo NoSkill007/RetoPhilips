@@ -12,6 +12,9 @@ export const rawSchema = z.object({
 }).strict();
 export const reviewedSchema = z.object({
   client: field, hospital: field, area: field, city: optionalField, country: optionalField,
+  // Free-form note the collaborator adds during review — never extracted by QVAC, never validated
+  // against the source text (it's their own annotation, not a claim about the equipment).
+  comments: z.string().trim().max(1000).nullable().optional(),
   equipment: z.array(z.object({
     modality: z.enum(modalities).nullable(), quantity: z.number().int().min(1).max(10000).nullable(),
     manufacturer: field, model: field, serial: field, age: z.number().min(0).max(150).nullable(),
@@ -20,7 +23,8 @@ export const reviewedSchema = z.object({
 export const inferenceSchema = z.object({ engine: z.string(), model: z.string(), durationMs: z.number().nonnegative() }).strict();
 export const profileSchema = z.object({ name: z.string().trim().min(1).max(80), role: z.enum(roles) }).strict();
 export const activeSchema = z.object({ profileId: z.uuid() }).strict();
-export const captureSchema = z.object({ text: z.string().max(8000).refine(value => value.trim().length >= 5) }).strict();
+export const captureSchema = z.object({ text: z.string().max(8000).refine(value => value.trim().length >= 5),
+  source: z.enum(['text', 'voice']).default('text') }).strict();
 export const saveSchema = z.object({
   draftId: z.uuid(), reviewed: reviewedSchema, hospitalId: z.uuid().nullable(), splitGroupId: z.uuid().nullable().optional(),
   evidenceIds: z.array(z.uuid()).max(10).optional(),

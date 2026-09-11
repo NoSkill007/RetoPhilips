@@ -2,11 +2,15 @@ import { RequestError } from './request-error.js';
 import { assessObservation } from './confidence.js';
 import { modalities } from './observation-schema.js';
 import { opportunities, isStale } from './opportunities.js';
+import { regionFor } from './region.js';
 
-const DATASET_ID = 'sitesignal-fictional-latam-v2';
+const DATASET_ID = 'sitesignal-fictional-latam-v3';
 /** Fixed to the original 7-category catalog so the deterministic demo dataset (and its documented
  * natural-query scenarios) stays stable as the full modality catalog grows. */
 const demoModalities = ['Resonancia magnética', 'Tomografía computarizada', 'Ultrasonido', 'Monitoreo de pacientes', 'Rayos X', 'Sistema intervencionista', 'Otro'];
+/** The regional map only draws shapes for these three countries; the two entries beyond them
+ * (México, Chile) exist to demonstrate that a hospital works fully everywhere else — filters, lists,
+ * aggregations, hospital 360 — even without a clickable shape on the map itself. */
 const hospitals = [
   ['Red Istmo Ficticia', 'Hospital Brisa Ficticio', 'Panamá', 'Ciudad de Panamá'],
   ['Red Istmo Ficticia', 'Hospital Canal Ficticio', 'Panamá', 'Ciudad de Panamá'],
@@ -18,6 +22,8 @@ const hospitals = [
   ['Red Andina Ficticia', 'Hospital Mirador Ficticio', 'Colombia', 'Bogotá'],
   ['Red Andina Ficticia', 'Clínica Río Ficticia', 'Colombia', 'Medellín'],
   ['Salud Pacífico Ficticia', 'Hospital Ceiba Ficticio', 'Colombia', 'Cali'],
+  ['Red Azteca Ficticia', 'Hospital Sol Ficticio', 'México', 'Ciudad de México'],
+  ['Red Andes Ficticia', 'Clínica Cordillera Ficticia', 'Chile', 'Santiago'],
 ];
 const capturedDates = ['2026-08-01T12:00:00.000Z', '2026-05-15T12:00:00.000Z', '2025-02-10T12:00:00.000Z', '2026-07-20T12:00:00.000Z', '2024-11-01T12:00:00.000Z', '2026-03-01T12:00:00.000Z'];
 const people = [
@@ -36,7 +42,7 @@ function seedRows() {
       const number = hospitalIndex * 6 + equipmentIndex + 1;
       const [person, role] = people[(hospitalIndex + equipmentIndex) % people.length];
       return {
-        id: uuid('2', number), hospitalId, client, hospital: name, country, city,
+        id: uuid('2', number), hospitalId, client, hospital: name, country, city, region: regionFor(country),
         modality: demoModalities[(hospitalIndex + equipmentIndex) % demoModalities.length],
         manufacturer: `Fabricante Ficticio ${(equipmentIndex % 3) + 1}`,
         model: `Modelo Ficticio ${String.fromCharCode(65 + (hospitalIndex + equipmentIndex) % 8)}`,
@@ -90,7 +96,7 @@ export function regionalPanorama(db, now = () => new Date()) {
     } catch (error) { db.exec('ROLLBACK'); throw error; }
     return { datasetId: DATASET_ID, hospitals: hospitals.length, equipment: hospitals.length * 6 };
   }
-  if (Number(db.prepare('SELECT COUNT(*) AS count FROM regional_demo_equipment WHERE dataset_id = ?').get(DATASET_ID)?.count) !== 60) reset();
+  if (Number(db.prepare('SELECT COUNT(*) AS count FROM regional_demo_equipment WHERE dataset_id = ?').get(DATASET_ID)?.count) !== hospitals.length * 6) reset();
   /** @returns {any[]} */
   function rows() { return db.prepare('SELECT data FROM regional_demo_equipment WHERE dataset_id = ? ORDER BY id').all(DATASET_ID).map(row => JSON.parse(String(row.data))); }
   /** @returns {any[]} */
@@ -106,18 +112,20 @@ export function regionalPanorama(db, now = () => new Date()) {
       const quantity = Math.max(1, Number(item.quantity) || 1);
       return Array.from({ length: quantity }, (_, index) => ({
         id: `${row.id}:${index + 1}`, hospitalId: row.hospital_id, client: hospital.client ?? 'Cliente no informado', hospital: hospital.name,
-        country: hospital.country ?? 'Ubicación no informada', city: hospital.city ?? 'Ciudad no informada', area: observation.reviewed.area ?? null, modality: item.modality ?? 'Modalidad no informada',
+        country: hospital.country ?? 'Ubicación no informada', city: hospital.city ?? 'Ciudad no informada',
+        region: hospital.region ?? regionFor(hospital.country ? String(hospital.country) : null) ?? 'Región no informada',
+        area: observation.reviewed.area ?? null, modality: item.modality ?? 'Modalidad no informada',
         manufacturer: item.manufacturer, model: item.model, serial: item.serial, age: item.age, capturedAt: observation.capturedAt,
         profile: observation.profile, confirmedFields, fictional: false,
         hasConflict: conflicts.some(conflict => conflict.itemIds?.includes(row.id) && ['modality', 'manufacturer', 'model', 'serial', 'age'].includes(conflict.field)),
       }));
     });
   }
-  function dataset() { return { id: DATASET_ID, label: 'Dataset sintético ficticio para demostración', fictional: true, hospitals: 10, equipment: 60 }; }
+  function dataset() { return { id: DATASET_ID, label: 'Dataset sintético ficticio para demostración', fictional: true, hospitals: hospitals.length, equipment: hospitals.length * 6 }; }
   /** @param {URLSearchParams} params */
   function panorama(params) {
     const all = [...rows(), ...capturedRows()].map(record => { const assessment = assessmentFor(record, now()); return { ...record, confidence: assessment.confidence.score, state: assessment.overallState }; });
-    const selected = Object.fromEntries(['client', 'hospital', 'country', 'city', 'modality', 'state', 'confidence', 'freshness'].map(key => [key, params.get(key) ?? '']));
+    const selected = Object.fromEntries(['client', 'hospital', 'region', 'country', 'city', 'modality', 'state', 'confidence', 'freshness'].map(key => [key, params.get(key) ?? '']));
     /** @param {string} key */
     const parseAgeFilter = (key) => { const value = params.get(key); if (value === null || value === '') return null; const parsed = Number(value); if (!Number.isFinite(parsed) || parsed < 0 || parsed > 150) throw new RequestError(400, `El filtro ${key} no es válido.`); return parsed; };
     const minAge = parseAgeFilter('minAge'); const maxAge = parseAgeFilter('maxAge');
@@ -130,7 +138,7 @@ export function regionalPanorama(db, now = () => new Date()) {
     }) && (minAge === null || (record.age !== null && record.age !== undefined && record.age >= minAge)) && (maxAge === null || (record.age !== null && record.age !== undefined && record.age <= maxAge)));
     const hospitalRows = new Map();
     for (const record of filtered) {
-      const current = hospitalRows.get(record.hospitalId) ?? { id: record.hospitalId, name: record.hospital, client: record.client, country: record.country, city: record.city, area: record.area ?? null, fictional: record.fictional, source: record.fictional ? 'Dataset sintético ficticio' : 'Captura local', equipmentCount: 0, confidenceTotal: 0, staleInformation: 0, potentialOpportunities: 0 };
+      const current = hospitalRows.get(record.hospitalId) ?? { id: record.hospitalId, name: record.hospital, client: record.client, region: record.region, country: record.country, city: record.city, area: record.area ?? null, fictional: record.fictional, source: record.fictional ? 'Dataset sintético ficticio' : 'Captura local', equipmentCount: 0, confidenceTotal: 0, staleInformation: 0, potentialOpportunities: 0 };
       current.equipmentCount += 1; current.confidenceTotal += record.confidence;
       if (stale(record, now())) current.staleInformation += 1;
       if (record.age >= 7 && record.confidence >= 60 && !stale(record, now()) && !record.hasConflict) current.potentialOpportunities += 1;
@@ -143,6 +151,7 @@ export function regionalPanorama(db, now = () => new Date()) {
       filters: {
         clients: [...new Set(all.map(row => row.client))].sort(),
         hospitals: [...new Map(all.map(row => [row.hospitalId, { id: row.hospitalId, name: row.hospital }])).values()].sort((a, b) => a.name.localeCompare(b.name, 'es')),
+        regions: [...new Set(all.map(row => row.region))].sort(),
         countries: [...new Set(all.map(row => row.country))].sort(), cities: [...new Set(all.map(row => row.city))].sort(), modalities: modalities.slice(),
       },
       metrics: {
@@ -152,6 +161,7 @@ export function regionalPanorama(db, now = () => new Date()) {
         potentialOpportunities: filtered.filter(row => row.age >= 7 && row.confidence >= 60 && !stale(row, now()) && !row.hasConflict).length,
       },
       aggregations: {
+        region: aggregate(filtered, row => row.region),
         modality: aggregate(filtered, row => row.modality), geography: aggregate(filtered, row => `${row.country} · ${row.city}`),
         age: aggregate(filtered, row => ageBand(row.age)), confidence: aggregate(filtered, row => confidenceBand(row.confidence)),
         freshness: aggregate(filtered, row => stale(row, now()) ? 'Desactualizada (>12 meses)' : 'Vigente (≤12 meses)'),
@@ -176,7 +186,7 @@ export function regionalPanorama(db, now = () => new Date()) {
       itemId: record.id, hospitalId: id, modality: record.modality, manufacturer: record.manufacturer, model: record.model, serial: record.serial,
       age: record.age, confidence: record.assessment.confidence.score, capturedAt: record.capturedAt, hasIdentityConflict: false, supportingObservationIds: [record.id],
     }));
-    return { id, name: first.hospital, client: first.client, country: first.country, city: first.city, fictional: true, dataset: dataset(), installedBase: { total: 6, items, duplicateCandidates: [], conflicts: [], conflictHistory: [], changeHistory: [], opportunities: opportunityList }, observations };
+    return { id, name: first.hospital, client: first.client, region: first.region, country: first.country, city: first.city, fictional: true, dataset: dataset(), installedBase: { total: 6, items, duplicateCandidates: [], conflicts: [], conflictHistory: [], changeHistory: [], opportunities: opportunityList }, observations };
   }
   /** @param {string} method @param {string} path */
   async function handle(method, path) {

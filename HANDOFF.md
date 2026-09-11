@@ -117,9 +117,19 @@ El ticket #14 cierra el backlog del hackathon con la entrega offline. Cambios:
 
 Verificado con QVAC real: tras una extracción real, `/api/status` mostró `qvac.diagnostics.lastInference.durationMs` con el valor real (~1.4–2 s en caliente en el hardware de referencia) y `device` con la descripción real de CPU/GPU de esta máquina; ambas exportaciones se probaron contra datos ya capturados en sesiones anteriores y devolvieron CSV/JSON coherentes con lo visible en la UI.
 
+Tras auditar la implementación completa contra el brief oficial de Philips (releído en esta sesión desde el `.docx` real), se confirmó que el prototipo mínimo y las ocho metas adicionales del brief están cubiertas. Se identificaron y cerraron tres brechas menores señaladas por el usuario:
+
+- **Jerarquía Región → País → Ciudad**: `src/region.js` (nuevo) deriva la región de un país mediante una lista de países latinoamericanos conocidos (hoy todos resuelven a "América Latina"; cualquier país fuera de esa lista resuelve a "Otra región" en vez de fallar). `src/regional-panorama.js` la calcula para el dataset ficticio y para hospitales capturados; `src/observations.js` migra una columna `region` en la tabla `hospitals` (mismo patrón que `city`/`country`) y la calcula automáticamente al crear un hospital nuevo — nunca se le pide al colaborador ni a QVAC. Filtro "Región" nuevo en el panorama (`public/index.html`, `public/panorama.js`) y gráfico de agregación "Región" (automático, vía el bucle genérico de gráficos de `panorama.js`). `natural-query.js` no se tocó — Región no es (todavía) un filtro interpretable por lenguaje natural, solo por el panorama visual.
+- **Más de tres países**: el dataset ficticio precargado creció de 10 a 12 hospitales (72 equipos), agregando uno en México y uno en Chile. El mapa vectorial SVG solo dibuja formas para los tres países principales (Panamá, Brasil, Colombia) — decisión explícita del usuario ("no veo porque mandarlo arriba", refiriéndose a no tocar esa posición) — pero los países nuevos funcionan igual en el filtro de País, la lista de hospitales, las agregaciones y el perfil 360; solo no resaltan una forma en el mapa. Un texto junto al mapa ahora aclara esto. `DATASET_ID` subió a `v3` para forzar el reseed de instalaciones existentes.
+- **Comentario libre por observación**: `reviewedSchema` (`src/observation-schema.js`) gana `comments` (opcional, ≤1000 caracteres, nunca validado contra el relato). Textarea nueva en el formulario de revisión (`public/index.html`, `public/capture.js`); se muestra en el perfil 360 de cada observación guardada.
+- **`provenance` distingue el canal de captura**: `captureSchema` gana `source: 'text' | 'voice'` (default `'text'`). El textarea de observación lleva un `dataset.source` que `voice.js` marca `'voice'` tras una transcripción exitosa y que un `keydown` real (tipeo genuino, no el evento sintético que dispara el propio `voice.js`) revierte a `'text'` — así se distingue una edición manual posterior a un dictado. El canal viaja en `provenance.channel` desde el borrador hasta la observación guardada y se muestra en la revisión y en el perfil 360.
+- **Pruebas**: `test/comments-and-provenance.test.js` (nuevo, 4 pruebas: canal por defecto, canal de voz de punta a punta, comentario guardado sin afectar validación, comentario ausente se guarda como `null`). `test/city-country.test.js` y `test/regional-panorama.test.js` ampliados con aserciones de región (incluida la migración seguro de una base sin la columna `region`).
+
+Verificado: `npm test` 86/86, `npm run typecheck` limpio, `git diff --check` limpio, y confirmado en vivo con QVAC real (extracción real → canal "texto escrito" visible en la revisión y en el perfil 360; comentario guardado y visible; región/países nuevos presentes en `/api/panorama`).
+
 ## Próximo trabajo
 
-El backlog original de tickets está completo (#2 a #14). Cualquier trabajo adicional (cifrado, autenticación, empaquetado como instalador, etc.) queda fuera del alcance de este prototipo de hackathon — ver "Garantías del prototipo frente a requisitos de producción" en `README.md`.
+El backlog original de tickets está completo (#2 a #14), y las tres brechas menores de la auditoría contra el brief quedaron cerradas. Cualquier trabajo adicional (cifrado, autenticación, empaquetado como instalador, región en consultas de lenguaje natural, etc.) queda fuera del alcance de este prototipo de hackathon — ver "Garantías del prototipo frente a requisitos de producción" en `README.md`.
 
 Para cada ticket: implementa el comportamiento completo, ejecuta `npm run typecheck`, `npm test` y `git diff --check`, revisa especificación y estándares, crea un commit local y reinicia la aplicación con QVAC para la prueba visual.
 
@@ -148,7 +158,7 @@ La aplicación escucha en `http://127.0.0.1:3210`. Si el puerto está ocupado, c
 
 Estado verificado al escribir este documento:
 
-- `npm test`: 82/82 pruebas aprobadas (`test/photo-evidence.test.js` tiene 10 tras agregar 4 pruebas de regresión para los huecos reales de extracción; `test/offline-delivery.test.js` tiene 5).
+- `npm test`: 86/86 pruebas aprobadas (`test/photo-evidence.test.js` tiene 10 tras agregar 4 pruebas de regresión para los huecos reales de extracción; `test/offline-delivery.test.js` tiene 5; `test/comments-and-provenance.test.js` es nuevo con 4).
 - `npm run qvac:check:voice`: transcribió las dos muestras sintéticas con QVAC real (Whisper small Q8_0) correctamente, en español e inglés.
 - `npm run qvac:check:photo`: extrajo correctamente fabricante, modelo, número de serie y año de las dos placas ficticias bundleadas con QVAC real (EasyOCR local).
 - Verificación visual en navegador: la sección "Adjuntar evidencia fotográfica" se despliega en cada tarjeta de equipo del formulario de revisión, sube el archivo a `/api/evidence` y muestra el mensaje de error esperado cuando la imagen no es válida (probado intencionalmente con un archivo corrupto).

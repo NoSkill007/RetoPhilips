@@ -23,9 +23,9 @@ test('carga y reinicia un dataset regional determinista y explícitamente fictic
   const context = await fixture();
   try {
     const first = await context.get('/api/panorama');
-    assert.deepEqual({ hospitals: first.dataset.hospitals, equipment: first.dataset.equipment, fictional: first.dataset.fictional }, { hospitals: 10, equipment: 60, fictional: true });
+    assert.deepEqual({ hospitals: first.dataset.hospitals, equipment: first.dataset.equipment, fictional: first.dataset.fictional }, { hospitals: 12, equipment: 72, fictional: true });
     assert.match(first.dataset.label, /ficticio/i);
-    assert.equal(first.hospitals.length, 10);
+    assert.equal(first.hospitals.length, 12);
     assert.ok(first.hospitals.every(/** @param {any} hospital */ hospital => hospital.fictional && /fict.ci/i.test(`${hospital.name} ${hospital.client}`)));
     const reset = await context.post('/api/demo/reset');
     const second = await context.get('/api/panorama');
@@ -38,14 +38,17 @@ test('agrega equipos, confianza, vigencia, edad, modalidad y geografía', async 
   const context = await fixture();
   try {
     const data = await context.get('/api/panorama');
-    assert.equal(data.metrics.hospitals, 10);
-    assert.equal(data.metrics.equipment, 60);
+    assert.equal(data.metrics.hospitals, 12);
+    assert.equal(data.metrics.equipment, 72);
     assert.ok(data.metrics.averageConfidence >= 0 && data.metrics.averageConfidence <= 100);
     assert.ok(data.metrics.staleInformation > 0);
     assert.ok(data.metrics.potentialOpportunities > 0);
-    for (const values of /** @type {any[][]} */ (Object.values(data.aggregations))) assert.equal(values.reduce((sum, item) => sum + item.count, 0), 60);
+    for (const values of /** @type {any[][]} */ (Object.values(data.aggregations))) assert.equal(values.reduce((sum, item) => sum + item.count, 0), 72);
     assert.ok(data.filters.modalities.includes('Otro'));
     assert.ok(data.aggregations.confidence.every(/** @param {any} item */ item => ['Baja (0–49)', 'Media (50–79)', 'Alta (80–100)'].includes(item.value)));
+    assert.deepEqual(data.aggregations.region.map(/** @param {any} region */ region => region.value), ['América Latina']);
+    // the map only draws the three main countries; the two hospitals outside it (México, Chile) still
+    // count in every other total above, but are excluded here and from the map/legend widget itself.
     assert.deepEqual(data.map.map(/** @param {any} country */ country => country.country).sort(), ['Brasil', 'Colombia', 'Panamá']);
     assert.equal(data.map.reduce(/** @param {number} sum @param {any} country */ (sum, country) => sum + country.equipment, 0), 60);
   } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
@@ -55,7 +58,7 @@ test('aplica filtros combinados a métricas, mapa, agregaciones y hospitales', a
   const context = await fixture();
   try {
     const data = await context.get('/api/panorama?country=Panam%C3%A1&city=Ciudad%20de%20Panam%C3%A1&modality=Tomograf%C3%ADa%20computarizada');
-    assert.ok(data.metrics.equipment > 0 && data.metrics.equipment < 60);
+    assert.ok(data.metrics.equipment > 0 && data.metrics.equipment < 72);
     assert.ok(data.hospitals.every(/** @param {any} hospital */ hospital => hospital.country === 'Panamá' && hospital.city === 'Ciudad de Panamá'));
     assert.deepEqual(data.map.map(/** @param {any} country */ country => country.country), ['Panamá']);
     assert.deepEqual(data.aggregations.modality, [{ value: 'Tomografía computarizada', count: data.metrics.equipment }]);
@@ -94,13 +97,13 @@ test('una observación guardada actualiza el panorama sin depender del reinicio 
     const reviewed = { client: 'Red Campo Ficticia', hospital: 'Hospital Campo Ficticio', area: 'Área Norte Ficticia', equipment: [{ modality: 'Tomografía computarizada', quantity: 1, manufacturer: 'Marca Ficticia', model: 'Modelo Ficticio', serial: 'FIC-CAMPO-1', age: null }] };
     const saved = await context.post('/api/observations', { draftId: draft.id, reviewed, hospitalId: null });
     const panorama = await context.get('/api/panorama');
-    assert.equal(panorama.metrics.hospitals, 11);
-    assert.equal(panorama.metrics.equipment, 61);
+    assert.equal(panorama.metrics.hospitals, 13);
+    assert.equal(panorama.metrics.equipment, 73);
     assert.ok(panorama.hospitals.some(/** @param {any} hospital */ hospital => hospital.id === saved.hospitalId && hospital.country === 'Ubicación no informada' && hospital.city === 'Ciudad no informada' && hospital.area === 'Área Norte Ficticia' && hospital.fictional === false && hospital.source === 'Captura local'));
     const filtered = await context.get(`/api/panorama?hospital=${saved.hospitalId}`);
     assert.equal(filtered.metrics.equipment, 1);
     assert.deepEqual(filtered.aggregations.age, [{ value: 'Desconocida', count: 1 }]);
     await context.post('/api/demo/reset');
-    assert.equal((await context.get('/api/panorama')).metrics.equipment, 61);
+    assert.equal((await context.get('/api/panorama')).metrics.equipment, 73);
   } finally { await context.app.close(); await rm(context.directory, { recursive: true, force: true }); }
 });

@@ -25,6 +25,7 @@ function render(data) {
   }
   options(/** @type {HTMLSelectElement} */ (form.elements.namedItem('client')), data.filters.clients);
   options(/** @type {HTMLSelectElement} */ (form.elements.namedItem('hospital')), data.filters.hospitals);
+  options(/** @type {HTMLSelectElement} */ (form.elements.namedItem('region')), data.filters.regions);
   options(/** @type {HTMLSelectElement} */ (form.elements.namedItem('country')), data.filters.countries);
   options(/** @type {HTMLSelectElement} */ (form.elements.namedItem('city')), data.filters.cities);
   options(/** @type {HTMLSelectElement} */ (form.elements.namedItem('modality')), data.filters.modalities);
@@ -43,7 +44,7 @@ function render(data) {
   if (!data.hospitals.length) list.append(node('p', 'No hay hospitales para esta combinación de filtros.'));
   const charts = el('panorama-charts'); charts.replaceChildren();
   /** @type {Record<string, string>} */
-  const names = { modality: 'Modalidad', geography: 'Geografía', age: 'Antigüedad aproximada', confidence: 'Confianza', freshness: 'Vigencia' };
+  const names = { region: 'Región', modality: 'Modalidad', geography: 'Geografía', age: 'Antigüedad aproximada', confidence: 'Confianza', freshness: 'Vigencia' };
   for (const [key, values] of Object.entries(data.aggregations)) {
     const chart = document.createElement('article'); chart.className = 'bar-chart'; chart.append(node('h3', names[key]));
     const maximum = Math.max(1, ...values.map(/** @param {any} item */ item => item.count));

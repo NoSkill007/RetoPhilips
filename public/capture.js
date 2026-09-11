@@ -160,6 +160,7 @@ function renderReview() {
   el('location-fields').replaceChildren(); el('equipment-cards').replaceChildren();
   for (const [key, label] of [['client', 'Cliente'], ['hospital', 'Hospital'], ['area', 'Área o edificio'], ['city', 'Ciudad'], ['country', 'País']]) el('location-fields').append(inputField(key, label, draft.reviewed[key] ?? null));
   for (const equipment of draft.reviewed.equipment) addCard(equipment);
+  const comments = el('observation-comments'); if (comments instanceof HTMLTextAreaElement) comments.value = draft.reviewed.comments ?? '';
   const target = select('hospital-choice'); target.replaceChildren(); option(target, '', 'Selecciona un destino');
   option(target, 'new', 'Crear un hospital con los datos revisados');
   for (const hospital of hospitals) option(target, hospital.id, `${draft.candidates.some(/** @param {{id: string}} c */ c => c.id === hospital.id) ? 'Posible coincidencia · ' : ''}${hospital.name} · ${hospital.client ?? 'Cliente desconocido'}`);
@@ -179,7 +180,8 @@ function renderReview() {
     notice.append(list);
   }
   renderAssessment(el('draft-assessment'), draft.assessment);
-  el('inference-info').textContent = draft.provenance.kind === 'manual' ? 'Procedencia: captura manual · La IA no produjo el resultado guardado.' : `${draft.provenance.metadata.engine} · ${draft.provenance.metadata.model} · ${(draft.provenance.metadata.durationMs / 1000).toFixed(1)} s de inferencia · ${draft.provenance.attempts} intento${draft.provenance.attempts === 1 ? '' : 's'}`;
+  const channelLabel = draft.provenance.channel === 'voice' ? 'dictado por voz' : 'texto escrito';
+  el('inference-info').textContent = (draft.provenance.kind === 'manual' ? 'Procedencia: captura manual · La IA no produjo el resultado guardado.' : `${draft.provenance.metadata.engine} · ${draft.provenance.metadata.model} · ${(draft.provenance.metadata.durationMs / 1000).toFixed(1)} s de inferencia · ${draft.provenance.attempts} intento${draft.provenance.attempts === 1 ? '' : 's'}`) + ` · Canal: ${channelLabel}`;
   renderFollowUp();
   el('review').hidden = false; el('review').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -214,20 +216,23 @@ form('capture-form').addEventListener('submit', async event => {
   button.disabled = true; input.readOnly = true; el('review').hidden = true; draft = null; attachedEvidenceIds = [];
   feedback('QVAC está leyendo tu observación en esta computadora…');
   try {
-    draft = await api('/api/drafts', { text: input.value });
+    draft = await api('/api/drafts', { text: input.value, source: input.dataset.source === 'voice' ? 'voice' : 'text' });
     hospitals = await api('/api/hospitals'); renderReview();
     feedback(draft.provenance.kind === 'manual' ? 'QVAC falló dos veces. Completa la captura manual sin perder tu relato.' : 'Extracción lista. Revisa los datos antes de guardarlos.', draft.provenance.kind === 'manual');
   } catch (error) { report(error); }
   finally { button.disabled = false; input.readOnly = false; }
 });
 el('observation').addEventListener('input', () => { if (draft) { draft = null; attachedEvidenceIds = []; el('review').hidden = true; feedback('El texto cambió. Vuelve a extraer para revisar la nueva versión.'); } });
+// A real keystroke (unlike voice.js's programmatic fill, which only dispatches "input") means the
+// collaborator is now typing by hand — the capture channel reverts from "voice" to "text" accordingly.
+el('observation').addEventListener('keydown', () => { el('observation').dataset.source = 'text'; });
 el('add-equipment').addEventListener('click', () => { if (el('equipment-cards').children.length < 20) addCard({}); });
 form('review-form').addEventListener('submit', async event => {
   event.preventDefault(); if (!draft) return;
   const button = el('save'); if (!(button instanceof HTMLButtonElement)) return;
   const data = new FormData(form('review-form'));
   const reviewed = { client: data.get('client') || null, hospital: data.get('hospital') || null, area: data.get('area') || null,
-    city: data.get('city') || null, country: data.get('country') || null,
+    city: data.get('city') || null, country: data.get('country') || null, comments: data.get('comments') ? String(data.get('comments')).trim() || null : null,
     equipment: [...el('equipment-cards').querySelectorAll('fieldset')].map(card => {
       /** @type {Record<string, string | number | null>} */
       const equipment = {};
@@ -320,7 +325,7 @@ function opportunityCard(signal, actionable) {
 async function showHospital(id) {
   const hospital = await api('/api/hospitals/' + id); const target = el('hospital-view'); target.replaceChildren();
   target.append(node('h2', `Perfil 360 · ${hospital.name}`), node('p', `Cliente: ${hospital.client ?? 'Desconocido'}`));
-  if (!hospital.fictional) target.append(node('p', `Ubicación: ${hospital.city ?? 'Ciudad desconocida'}, ${hospital.country ?? 'País desconocido'}`));
+  if (!hospital.fictional) target.append(node('p', `Ubicación: ${hospital.city ?? 'Ciudad desconocida'}, ${hospital.country ?? 'País desconocido'} · Región: ${hospital.region ?? 'Desconocida'}`));
   target.append(node('h3', `Base instalada · ${hospital.installedBase.total} equipos reportados`));
   const base = document.createElement('div'); base.className = 'installed-base';
   if (!hospital.installedBase.items.length) base.append(node('p', 'Todavía no hay equipos representados.'));
@@ -418,11 +423,13 @@ async function showHospital(id) {
       for (const [key, label] of equipmentFields) list.append(node('dt', label), node('dd', `${item[key] === null ? 'Desconocido' : String(item[key])} · ${observation.assessment.equipment[index][key].state}`));
       article.append(list);
     }
+    if (observation.reviewed.comments) article.append(node('p', `Comentarios: ${observation.reviewed.comments}`));
     const details = document.createElement('details'); details.append(node('summary', 'Texto original y procedencia'));
     const original = node('blockquote', observation.originalText); original.className = 'original';
-    const provenance = observation.provenance.kind === 'seed' ? `Dataset sintético ficticio · ${observation.provenance.dataset}` : observation.provenance.kind === 'manual'
+    const channel = observation.provenance.channel === 'voice' ? ' · Canal: dictado por voz' : observation.provenance.channel === 'text' ? ' · Canal: texto escrito' : '';
+    const provenance = (observation.provenance.kind === 'seed' ? `Dataset sintético ficticio · ${observation.provenance.dataset}` : observation.provenance.kind === 'manual'
       ? `Captura manual tras ${observation.provenance.attempts} fallos de QVAC`
-      : `${observation.provenance.metadata.engine} · ${observation.provenance.metadata.model} · ${observation.provenance.metadata.durationMs} ms`;
+      : `${observation.provenance.metadata.engine} · ${observation.provenance.metadata.model} · ${observation.provenance.metadata.durationMs} ms`) + channel;
     details.append(original, node('p', `Capturada: ${new Date(observation.capturedAt).toLocaleString('es')} · ${provenance}`));
     article.append(details); target.append(article);
   }

@@ -114,6 +114,9 @@ el('voice-transcribe').addEventListener('click', async () => {
     if (!response.ok) throw new Error(result.error ?? 'No se pudo transcribir el audio.');
     const observation = /** @type {HTMLTextAreaElement} */ (el('observation'));
     observation.value = result.transcript;
+    // Marks the capture channel as "voice" for as long as the text stays exactly what QVAC transcribed;
+    // capture.js resets it back to "text" the moment the collaborator actually edits the box by hand.
+    observation.dataset.source = 'voice';
     observation.dispatchEvent(new Event('input', { bubbles: true }));
     observation.scrollIntoView({ behavior: 'smooth', block: 'center' });
     feedback(`Transcripción lista (${result.metadata.engine} · ${result.metadata.model} · ${(result.metadata.durationMs / 1000).toFixed(1)} s). Corrígela en el cuadro de texto antes de extraer.`);
