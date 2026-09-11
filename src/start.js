@@ -4,28 +4,31 @@ import { createTextRuntime } from './text-runtime.js';
 import { createVoiceRuntime } from './voice-runtime.js';
 import { createPlateRuntime } from './plate-runtime.js';
 import { extractPlateFields } from './plate-extraction.js';
+import { describeLocalDevice } from './device-info.js';
 
 const port = Number(process.env.SITESIGNAL_PORT ?? 3210);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error('SITESIGNAL_PORT debe ser un entero entre 1 y 65535.');
   process.exit(1);
 }
+const device = await describeLocalDevice();
 const runtime = createTextRuntime(process.env.SITESIGNAL_MODEL);
 const voiceRuntime = createVoiceRuntime(process.env.SITESIGNAL_VOICE_MODEL);
 const plateRuntime = createPlateRuntime(process.env.SITESIGNAL_PLATE_MODEL);
 try {
   const app = await startApplication({
     dataDirectory: process.env.SITESIGNAL_DATA ?? fileURLToPath(new URL('../data', import.meta.url)),
-    port, probeQvac: () => runtime.probe(), qvacStatus: runtime.status, extractText: (text, options) => runtime.extract(text, options),
-    interpretQuery: question => runtime.interpretQuery(question),
-    probeVoice: () => voiceRuntime.probe(), voiceStatus: voiceRuntime.status,
+    port, probeQvac: () => runtime.probe(), qvacStatus: runtime.status, qvacDiagnostics: runtime.diagnostics,
+    extractText: (text, options) => runtime.extract(text, options), interpretQuery: question => runtime.interpretQuery(question),
+    probeVoice: () => voiceRuntime.probe(), voiceStatus: voiceRuntime.status, voiceDiagnostics: voiceRuntime.diagnostics,
     transcribeAudio: (audio, language) => voiceRuntime.transcribe(audio, language),
-    probePlate: () => plateRuntime.probe(), plateStatus: plateRuntime.status,
+    probePlate: () => plateRuntime.probe(), plateStatus: plateRuntime.status, plateDiagnostics: plateRuntime.diagnostics,
     analyzeImage: async image => {
       const { blocks, metadata } = await plateRuntime.recognize(image);
       const fields = extractPlateFields(blocks);
       return { fields: { manufacturer: fields.manufacturer, model: fields.model, serial: fields.serial, year: fields.year }, ocrText: fields.ocrText, metadata };
     },
+    device,
   });
   console.log(`SiteSignal disponible en ${app.url}. Ctrl+C para detener.`);
   process.send?.({ url: app.url });

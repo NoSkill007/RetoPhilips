@@ -7,8 +7,8 @@ import { ZodError } from 'zod';
 import { observationApi } from './observations.js';
 import { RequestError } from './request-error.js';
 
-/** @param {{ dataDirectory: string, port: number, probeQvac: () => Promise<{state: string, message: string}>, qvacStatus?: () => {state: string, message: string}, extractText?: import('./observation-schema.js').TextExtractor, interpretQuery?: (question: string) => Promise<{fields: unknown, metadata: unknown}>, now?: () => Date, confirmationResolver?: (record: any) => string[], probeVoice?: () => Promise<{state: string, message: string}>, voiceStatus?: () => {state: string, message: string}, transcribeAudio?: (audio: Buffer, language: string) => Promise<{transcript: string, metadata: unknown}>, probePlate?: () => Promise<{state: string, message: string}>, plateStatus?: () => {state: string, message: string}, analyzeImage?: (image: Buffer) => Promise<{fields: unknown, ocrText: string, metadata: unknown}> }} options */
-export async function startApplication({ dataDirectory, port, probeQvac, qvacStatus, extractText = async () => { throw new Error('QVAC no configurado'); }, interpretQuery, now = () => new Date(), confirmationResolver = () => [], probeVoice = async () => ({ state: 'unavailable', message: 'Modelo de voz no configurado.' }), voiceStatus, transcribeAudio = async () => { throw new RequestError(503, 'La transcripción de voz local no está configurada.'); }, probePlate = async () => ({ state: 'unavailable', message: 'Modelo de evidencia fotográfica no configurado.' }), plateStatus, analyzeImage = async () => { throw new RequestError(503, 'El análisis local de evidencia fotográfica no está configurado.'); } }) {
+/** @param {{ dataDirectory: string, port: number, probeQvac: () => Promise<{state: string, message: string}>, qvacStatus?: () => {state: string, message: string}, qvacDiagnostics?: () => {model: string | null, quantization: string | null, lastInference: any}, extractText?: import('./observation-schema.js').TextExtractor, interpretQuery?: (question: string) => Promise<{fields: unknown, metadata: unknown}>, now?: () => Date, confirmationResolver?: (record: any) => string[], probeVoice?: () => Promise<{state: string, message: string}>, voiceStatus?: () => {state: string, message: string}, voiceDiagnostics?: () => {model: string | null, quantization: string | null, lastInference: any}, transcribeAudio?: (audio: Buffer, language: string) => Promise<{transcript: string, metadata: unknown}>, probePlate?: () => Promise<{state: string, message: string}>, plateStatus?: () => {state: string, message: string}, plateDiagnostics?: () => {model: string | null, quantization: string | null, lastInference: any}, analyzeImage?: (image: Buffer) => Promise<{fields: unknown, ocrText: string, metadata: unknown}>, device?: string | null }} options */
+export async function startApplication({ dataDirectory, port, probeQvac, qvacStatus, qvacDiagnostics = () => ({ model: null, quantization: null, lastInference: null }), extractText = async () => { throw new Error('QVAC no configurado'); }, interpretQuery, now = () => new Date(), confirmationResolver = () => [], probeVoice = async () => ({ state: 'unavailable', message: 'Modelo de voz no configurado.' }), voiceStatus, voiceDiagnostics = () => ({ model: null, quantization: null, lastInference: null }), transcribeAudio = async () => { throw new RequestError(503, 'La transcripción de voz local no está configurada.'); }, probePlate = async () => ({ state: 'unavailable', message: 'Modelo de evidencia fotográfica no configurado.' }), plateStatus, plateDiagnostics = () => ({ model: null, quantization: null, lastInference: null }), analyzeImage = async () => { throw new RequestError(503, 'El análisis local de evidencia fotográfica no está configurado.'); }, device = null }) {
   await mkdir(dataDirectory, { recursive: true });
   const db = new DatabaseSync(join(dataDirectory, 'sitesignal.db'));
   try {
@@ -47,7 +47,9 @@ export async function startApplication({ dataDirectory, port, probeQvac, qvacSta
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({ api: { state: 'ready', message: 'API local disponible' }, database: {
         state: 'ready', message: 'SQLite local disponible', installationId: installation?.id, starts: installation?.starts,
-      }, qvac: qvacStatus?.() ?? qvac, voice: voiceStatus?.() ?? voice, plate: plateStatus?.() ?? plate }));
+      }, device, qvac: { ...(qvacStatus?.() ?? qvac), diagnostics: qvacDiagnostics() },
+      voice: { ...(voiceStatus?.() ?? voice), diagnostics: voiceDiagnostics() },
+      plate: { ...(plateStatus?.() ?? plate), diagnostics: plateDiagnostics() } }));
       return;
     }
     if (request.url?.startsWith('/api/')) {
@@ -69,6 +71,19 @@ export async function startApplication({ dataDirectory, port, probeQvac, qvacSta
           }
           if (!size) throw new RequestError(400, 'No se recibió audio.');
           response.end(JSON.stringify(await transcribeAudio(Buffer.concat(chunks), language)));
+          return;
+        }
+        if (pathname === '/api/export/installed-base.csv' && request.method === 'GET') {
+          const csv = await handleObservation('GET', '/api/export/installed-base.csv', undefined);
+          response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+          response.setHeader('Content-Disposition', 'attachment; filename="sitesignal-base-instalada.csv"');
+          response.end(csv);
+          return;
+        }
+        if (pathname === '/api/export/state.json' && request.method === 'GET') {
+          const data = await handleObservation('GET', '/api/export/state.json', undefined);
+          response.setHeader('Content-Disposition', 'attachment; filename="sitesignal-estado.json"');
+          response.end(JSON.stringify(data, null, 2));
           return;
         }
         if (pathname === '/api/evidence' && request.method === 'POST') {

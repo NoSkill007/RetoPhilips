@@ -46,6 +46,52 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
         supportingObservationIds: supporting.map(observation => observation.id) });
     });
   }
+  /** @param {string} value */
+  function csvCell(value) {
+    const text = value === null || value === undefined ? '' : String(value);
+    return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+  }
+  const installedBaseCsvColumns = ['hospital', 'cliente', 'ciudad', 'pais', 'tipo', 'modalidad', 'cantidad', 'fabricante',
+    'modelo', 'numero_de_serie', 'antiguedad_anos', 'estado_modalidad', 'estado_fabricante', 'estado_modelo', 'estado_serie',
+    'estado_antiguedad', 'evidencia_fotografica'];
+  /** Flattens the locally captured installed base — one row per equipment item across every hospital —
+   * for the offline delivery export. The precargado fictional dataset is reproducible from `/api/panorama`
+   * and "Restablecer demo", so it is intentionally left out; this file is only what this installation captured. */
+  function exportInstalledBaseCsv() {
+    const rows = [installedBaseCsvColumns.join(',')];
+    for (const hospital of db.prepare('SELECT * FROM hospitals ORDER BY name').all()) {
+      for (const item of base.present(String(hospital.id)).items) {
+        rows.push([hospital.name, hospital.client, hospital.city, hospital.country, item.kind, item.modality, item.quantity,
+          item.manufacturer, item.model, item.serial, item.age, item.fieldStates.modality, item.fieldStates.manufacturer,
+          item.fieldStates.model, item.fieldStates.serial, item.fieldStates.age, String((item.evidenceIds ?? []).length),
+        ].map(csvCell).join(','));
+      }
+    }
+    return rows.join('\r\n') + '\r\n';
+  }
+  /** Full local state for the offline delivery export: every captured hospital with its observations,
+   * installed-base items (states, conflicts, pending/resolved history), opportunity decisions and the
+   * evidence photos referenced by them (metadata and OCR text only — never the stored image bytes). */
+  function exportState() {
+    const hospitals = db.prepare('SELECT * FROM hospitals ORDER BY name').all();
+    const evidenceRows = db.prepare('SELECT id, hospital_id, mime_type, ocr_text, fields, created_at FROM evidence ORDER BY rowid').all();
+    const evidenceById = new Map(evidenceRows.map(row => [String(row.id), { id: row.id, mimeType: row.mime_type, ocrText: row.ocr_text, fields: JSON.parse(String(row.fields)), createdAt: row.created_at }]));
+    return {
+      exportedAt: now().toISOString(),
+      hospitals: hospitals.map(hospital => {
+        const hospitalId = String(hospital.id);
+        const installedBaseData = base.present(hospitalId);
+        const observationRows = db.prepare('SELECT data FROM observations WHERE hospital_id = ? ORDER BY rowid').all(hospitalId).map(row => JSON.parse(String(row.data)));
+        const opportunityList = opportunitiesForHospital(hospitalId, installedBaseData.items, installedBaseData.conflicts, observationRows);
+        const evidenceIds = new Set([
+          ...installedBaseData.items.flatMap(item => item.evidenceIds ?? []),
+          ...observationRows.flatMap(observation => observation.evidenceIds ?? []),
+        ]);
+        return { hospital, observations: observationRows, installedBase: installedBaseData, opportunities: opportunityList,
+          evidence: [...evidenceIds].map(id => evidenceById.get(id)).filter(Boolean) };
+      }),
+    };
+  }
   /** @param {string} id */
   function profile(id) {
     const row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(id);
@@ -73,6 +119,8 @@ export function observationApi(db, extractText, now = () => new Date(), confirma
   /** @param {string} method @param {string} path @param {unknown} body */
   return async function handle(method, path, body) {
     if (new URL(path, 'http://sitesignal.local').pathname === '/api/panorama' || path === '/api/demo/reset') return regional.handle(method, path);
+    if (path === '/api/export/installed-base.csv' && method === 'GET') return exportInstalledBaseCsv();
+    if (path === '/api/export/state.json' && method === 'GET') return exportState();
     if (path === '/api/natural-query' && method === 'POST') return query(body);
     if (path === '/api/evidence' && method === 'POST' && body && typeof body === 'object' && 'image' in body) {
       const { image, mimeType } = /** @type {{image: Buffer, mimeType: string}} */ (body);

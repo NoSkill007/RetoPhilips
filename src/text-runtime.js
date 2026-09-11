@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { inferenceSchema } from './observation-schema.js';
+import { diagnosticsFor } from './model-diagnostics.js';
 
 const resultSchema = z.object({ fields: z.unknown(), metadata: inferenceSchema });
 /** @param {string | undefined} modelPath */
@@ -15,6 +16,8 @@ export function createTextRuntime(modelPath) {
   let startup;
   /** @type {{ resolve: (value: import('./observation-schema.js').Extraction) => void, reject: (error: Error) => void, timer: NodeJS.Timeout } | undefined} */
   let pending;
+  /** @type {{engine: string, model: string, durationMs: number} | null} */
+  let lastInference = null;
   let closed = false;
   /** @param {string} message */
   function fail(message) {
@@ -43,7 +46,7 @@ export function createTextRuntime(modelPath) {
         } else if (message.type === 'result' && 'result' in message && pending) {
           const job = pending; pending = undefined; clearTimeout(job.timer);
           const result = resultSchema.safeParse(message.result);
-          if (result.success) job.resolve(result.data); else job.reject(new Error('Respuesta QVAC no válida'));
+          if (result.success) { lastInference = result.data.metadata; job.resolve(result.data); } else job.reject(new Error('Respuesta QVAC no válida'));
         } else if (message.type === 'error') {
           if (pending) { const job = pending; pending = undefined; clearTimeout(job.timer); job.reject(new Error('QVAC no pudo extraer el texto.')); }
           else { clearTimeout(timer); fail('QVAC no pudo cargar el modelo. Revisa el archivo GGUF y la memoria.'); resolve(state); }
@@ -71,6 +74,7 @@ export function createTextRuntime(modelPath) {
   }
   return {
     status: () => state,
+    diagnostics: () => diagnosticsFor(modelPath, lastInference),
     probe() { startup ??= initialize(); return startup; },
     /** @param {string} text @param {import('./observation-schema.js').ExtractionOptions} [options] */
     async extract(text, options = { attempt: 1 }) {

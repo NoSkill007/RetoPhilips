@@ -3,6 +3,7 @@ import { access, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
+import { diagnosticsFor } from './model-diagnostics.js';
 
 const resultSchema = z.object({ transcript: z.string(), metadata: z.object({
   engine: z.string(), model: z.string(), durationMs: z.number().nonnegative(), device: z.string(),
@@ -18,6 +19,8 @@ export function createVoiceRuntime(modelPath) {
   let startup;
   /** @type {{ resolve: (value: {transcript: string, metadata: any}) => void, reject: (error: Error) => void, timer: NodeJS.Timeout } | undefined} */
   let pending;
+  /** @type {{engine: string, model: string, durationMs: number, device: string} | null} */
+  let lastInference = null;
   let closed = false;
   /** @param {string} message */
   function fail(message) {
@@ -46,7 +49,7 @@ export function createVoiceRuntime(modelPath) {
         } else if (message.type === 'result' && 'result' in message && pending) {
           const job = pending; pending = undefined; clearTimeout(job.timer);
           const result = resultSchema.safeParse(message.result);
-          if (result.success) job.resolve(result.data); else job.reject(new Error('Respuesta de voz QVAC no válida'));
+          if (result.success) { lastInference = result.data.metadata; job.resolve(result.data); } else job.reject(new Error('Respuesta de voz QVAC no válida'));
         } else if (message.type === 'error') {
           if (pending) { const job = pending; pending = undefined; clearTimeout(job.timer); job.reject(new Error('QVAC no pudo transcribir el audio.')); }
           else { clearTimeout(timer); fail('QVAC no pudo cargar el modelo de voz. Revisa el archivo y la memoria.'); resolve(state); }
@@ -74,6 +77,7 @@ export function createVoiceRuntime(modelPath) {
   }
   return {
     status: () => state,
+    diagnostics: () => diagnosticsFor(modelPath, lastInference),
     probe() { startup ??= initialize(); return startup; },
     /** @param {Buffer} audioBuffer @param {string} language */
     async transcribe(audioBuffer, language) {

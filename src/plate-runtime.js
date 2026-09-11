@@ -3,6 +3,7 @@ import { access, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
+import { diagnosticsFor } from './model-diagnostics.js';
 
 const resultSchema = z.object({
   blocks: z.array(z.object({ text: z.string(), confidence: z.number().nullable() })),
@@ -20,6 +21,8 @@ export function createPlateRuntime(modelPath) {
   let startup;
   /** @type {{ resolve: (value: {blocks: {text: string, confidence: number | null}[], metadata: any}) => void, reject: (error: Error) => void, timer: NodeJS.Timeout } | undefined} */
   let pending;
+  /** @type {{engine: string, model: string, durationMs: number, device: string} | null} */
+  let lastInference = null;
   let closed = false;
   /** @param {string} message */
   function fail(message) {
@@ -48,7 +51,7 @@ export function createPlateRuntime(modelPath) {
         } else if (message.type === 'result' && 'result' in message && pending) {
           const job = pending; pending = undefined; clearTimeout(job.timer);
           const result = resultSchema.safeParse(message.result);
-          if (result.success) job.resolve(result.data); else job.reject(new Error('Respuesta de evidencia fotográfica QVAC no válida'));
+          if (result.success) { lastInference = result.data.metadata; job.resolve(result.data); } else job.reject(new Error('Respuesta de evidencia fotográfica QVAC no válida'));
         } else if (message.type === 'error') {
           if (pending) { const job = pending; pending = undefined; clearTimeout(job.timer); job.reject(new Error('QVAC no pudo leer la imagen.')); }
           else { clearTimeout(timer); fail('QVAC no pudo cargar el modelo de evidencia fotográfica. Revisa el archivo y la memoria.'); resolve(state); }
@@ -76,6 +79,7 @@ export function createPlateRuntime(modelPath) {
   }
   return {
     status: () => state,
+    diagnostics: () => diagnosticsFor(modelPath, lastInference),
     probe() { startup ??= initialize(); return startup; },
     /** @param {Buffer} imageBuffer */
     async recognize(imageBuffer) {

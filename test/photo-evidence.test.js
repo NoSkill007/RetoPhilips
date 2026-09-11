@@ -40,6 +40,50 @@ test('extractPlateFields solo confirma los campos que el OCR realmente respalda'
   assert.equal(fields.year, null);
 });
 
+test('una placa real fusiona la etiqueta y el valor en un solo bloque de OCR ("MODEL ; VALUE")', () => {
+  // Real OCR on a photographed nameplate often detects a whole "LABEL: value" line as one region,
+  // unlike our per-word synthetic fixtures above.
+  const fields = extractPlateFields([
+    { text: 'DEMOMED FICTICIO', confidence: 0.9 },
+    { text: 'MODEL ; BRILLIANCE DEMO', confidence: 0.4 },
+    { text: 'REF:', confidence: 0.3 }, { text: 'SN:', confidence: 0.3 }, { text: '000111', confidence: 0.9 }, { text: '222333', confidence: 0.9 },
+  ]);
+  assert.equal(fields.manufacturer, 'DEMOMED FICTICIO');
+  // an explicit MODEL label takes priority over the REF/SN row fallback for the model field.
+  assert.equal(fields.model, 'BRILLIANCE DEMO');
+  assert.equal(fields.serial, '222333');
+});
+
+test('REF y SN en la misma fila, con sus valores en la fila siguiente, respaldan modelo y serie sin una etiqueta de modelo separada', () => {
+  // Very common on real medical-device nameplates: "REF:" and "SN:" printed as two column headers,
+  // with their values printed as the next two OCR blocks rather than immediately after each own label.
+  const fields = extractPlateFields([
+    { text: 'DEMOMED FICTICIO', confidence: 0.9 },
+    { text: 'REF:', confidence: 0.3 }, { text: 'SN:', confidence: 0.3 }, { text: '453567023331', confidence: 0.95 }, { text: '896', confidence: 0.9 },
+  ]);
+  assert.equal(fields.model, '453567023331');
+  assert.equal(fields.serial, '896');
+});
+
+test('una etiqueta reconocida seguida de un bloque de texto ilegible no se confunde con el dato', () => {
+  // Regression: a recognized label immediately followed — purely by reading-order coincidence — by an
+  // unrelated garbled block of certification text must stay Unknown, never be reported as the serial.
+  const fields = extractPlateFields([
+    { text: 'SERIAL:', confidence: 0.4 }, { text: 'Mance pea/da2iCfasucchaptea )', confidence: 0.1 }, { text: '200049', confidence: 0.9 },
+  ]);
+  assert.equal(fields.serial, null);
+  // the same label with a clean, short, capitalized-or-numeric value right after it still works.
+  const clean = extractPlateFields([{ text: 'SERIAL:', confidence: 0.9 }, { text: 'FIC-000123', confidence: 0.9 }]);
+  assert.equal(clean.serial, 'FIC-000123');
+});
+
+test('un año de fabricación separado de su etiqueta por el nombre del mes se reconoce igual', () => {
+  const fields = extractPlateFields([
+    { text: 'MANUFACTURED:', confidence: 0.9 }, { text: 'October', confidence: 0.3 }, { text: '2007', confidence: 0.9 },
+  ]);
+  assert.equal(fields.year, 2007);
+});
+
 test('un texto sin ninguna etiqueta reconocida no inventa ningún campo', () => {
   const fields = extractPlateFields([{ text: 'Uso ficticio de demostracion', confidence: 0.9 }, { text: '220V', confidence: 0.9 }]);
   assert.deepEqual(fields, { manufacturer: null, model: null, serial: null, year: null, ocrText: 'Uso ficticio de demostracion 220V' });

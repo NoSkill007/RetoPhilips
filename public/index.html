@@ -25,10 +25,14 @@
 <section id="review" hidden aria-labelledby="review-title"><p class="eyebrow">02 · REVISAR</p><h2 id="review-title">Revisa antes de guardar</h2><p id="draft-author"></p><p class="hint">Corrige la interpretación. Los campos vacíos se guardan como desconocidos. Revisar un dato no lo convierte en un hecho confirmado.</p>
 <div id="validation-notice" class="validation-notice" hidden></div><div id="followup-panel" class="followup-panel" hidden></div><form id="review-form"><label for="hospital-choice">Destino de la observación</label><select id="hospital-choice" required></select><div id="split-group-panel" class="split-group-panel" hidden><label for="split-group-choice">Relacionar esta unidad con un grupo existente</label><select id="split-group-choice"></select><p class="hint">Selecciona un grupo solo cuando esta observación identifica una unidad con cantidad 1 y número de serie.</p></div><div id="location-fields" class="form-grid"></div><div id="equipment-cards" class="equipment-grid"></div><button type="button" id="add-equipment">Añadir tarjeta</button><div id="draft-assessment" class="assessment"></div><p id="inference-info" class="detail"></p><button type="submit" class="primary" id="save">Guardar observación revisada</button></form></section>
 <section id="hospitals" aria-labelledby="hospitals-title"><p class="eyebrow">03 · CONSULTAR</p><h2 id="hospitals-title">Clientes y hospitales</h2><p class="hint">Selecciona un hospital para consultar sus observaciones de campo y su procedencia.</p><div id="hospital-list" class="hospital-list"></div><div id="hospital-view" aria-live="polite"></div></section>
-<section aria-labelledby="status-heading"><div class="section-title"><h2 id="status-heading">Estado del entorno</h2><button id="refresh">Actualizar</button></div><p id="summary" role="status">Conectando con SiteSignal…</p><div class="cards">
+<section aria-labelledby="status-heading"><div class="section-title"><h2 id="status-heading">Estado del entorno</h2><button id="refresh">Actualizar</button></div><p id="summary" role="status">Conectando con SiteSignal…</p><p id="device-info" class="detail"></p><div class="cards">
 <article><span class="number">01</span><h3>Aplicación</h3><p id="api-state">Comprobando…</p><p id="api-message"></p></article>
 <article><span class="number">02</span><h3>Almacenamiento</h3><p id="database-state">Comprobando…</p><p id="database-message"></p></article>
-<article><span class="number">03</span><h3>Inteligencia local</h3><p id="qvac-state">Comprobando…</p><p id="qvac-message"></p></article>
-</div><p id="installation" class="detail"></p></section>
+<article><span class="number">03</span><h3>Extracción de texto (QVAC)</h3><p id="qvac-state">Comprobando…</p><p id="qvac-message"></p><p id="qvac-diagnostics" class="detail"></p></article>
+<article><span class="number">04</span><h3>Dictado de voz (QVAC)</h3><p id="voice-state">Comprobando…</p><p id="voice-message"></p><p id="voice-diagnostics" class="detail"></p></article>
+<article><span class="number">05</span><h3>Evidencia fotográfica (QVAC)</h3><p id="plate-state">Comprobando…</p><p id="plate-message"></p><p id="plate-diagnostics" class="detail"></p></article>
+</div><p id="installation" class="detail"></p>
+<div class="export-actions"><a id="export-csv" href="/api/export/installed-base.csv">Exportar base instalada (CSV)</a><a id="export-json" href="/api/export/state.json">Exportar observaciones y evidencia (JSON)</a></div>
+</section>
 </main>
 <footer>SiteSignal · Prototipo con datos sintéticos</footer></body></html>

@@ -2,6 +2,7 @@ import { basename, join } from 'node:path';
 import { writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { upscaleIfSmall } from './image-preprocess.js';
 
 try {
   const { loadModel, unloadModel, ocr, OCR_CRAFT } = await import('@qvac/sdk');
@@ -14,7 +15,8 @@ try {
     const started = performance.now();
     const tempPath = join(tmpdir(), `sitesignal-plate-${randomUUID()}.png`);
     try {
-      await writeFile(tempPath, Buffer.from(message.image, 'base64'));
+      const original = Buffer.from(message.image, 'base64');
+      await writeFile(tempPath, await upscaleIfSmall(original));
       const { blocks } = ocr({ modelId, image: tempPath, options: { paragraph: false } });
       const result = await blocks;
       const metadata = { engine: 'QVAC', model: basename(process.argv[2]), durationMs: Math.round(performance.now() - started), device: 'local' };
